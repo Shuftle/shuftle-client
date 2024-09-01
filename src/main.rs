@@ -1,7 +1,4 @@
-use bevy::{
-    diagnostic::FrameTimeDiagnosticsPlugin, prelude::*, sprite::MaterialMesh2dBundle,
-    window::PrimaryWindow,
-};
+use bevy::prelude::*;
 use bevy_mod_picking::prelude::*;
 
 fn main() {
@@ -18,43 +15,71 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn spawn_hand(mut commands: Commands, asset_server: Res<AssetServer>) {
-    (0..10).into_iter().for_each(|_| {
-        commands.spawn((
-            Cardbundle::default().with_sprite(SpriteBundle {
-                texture: asset_server.load("cards/card-clubs-1.png"),
+    let hand_id = commands
+        .spawn((
+            Hand,
+            SpriteBundle {
+                transform: Transform {
+                    translation: Vec3 {
+                        x: -450.,
+                        y: -250.,
+                        ..default()
+                    },
+                    ..default()
+                },
                 ..default()
-            }),
-            // Disable picking
-            On::<Pointer<DragStart>>::target_insert(Pickable::IGNORE),
-            // Re-enable picking
-            On::<Pointer<DragEnd>>::target_insert(Pickable::default()),
-            On::<Pointer<Drag>>::target_component_mut::<Transform>(|drag, transform| {
-                // Make the square follow the mouse
-                transform.translation.x += drag.delta.x;
-                transform.translation.y -= drag.delta.y;
-            }),
-        ));
-    })
+            },
+        ))
+        .id();
+    let cards_ids: Vec<_> = (0..10)
+        .map(|i| {
+            commands
+                .spawn((
+                    Cardbundle::default().with_sprite(SpriteBundle {
+                        texture: asset_server.load("cards/card-clubs-1.png"),
+                        transform: Transform {
+                            translation: Vec3 {
+                                x: 100. * i as f32,
+                                ..default()
+                            },
+                            ..default()
+                        },
+                        ..default()
+                    }),
+                    On::<Pointer<Click>>::run(select_play_card),
+                ))
+                .id()
+        })
+        .collect();
+    commands.entity(hand_id).push_children(&cards_ids);
 }
 
-fn drag_drop(
-    camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
+fn select_play_card(
+    click: Listener<Pointer<Click>>,
+    mut selected_card_query: Query<
+        (Entity, &mut Transform),
+        (With<Card>, With<Playable>, With<Selected>),
+    >,
+    mut unselected_card_query: Query<
+        &mut Transform,
+        (With<Card>, With<Playable>, Without<Selected>),
+    >,
+    mut commands: Commands,
 ) {
-    if let Some(cursor_position) = cursor_world_position(camera_query, window_query) {}
-}
-
-fn cursor_world_position(
-    camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-) -> Option<Vec2> {
-    let (camera, camera_transform) = camera_query.single();
-    let window = window_query.single();
-
-    window
-        .cursor_position()
-        .and_then(|cursor| camera.viewport_to_world(camera_transform, cursor))
-        .map(|ray| ray.origin.truncate())
+    let clicked_card = click.target;
+    for (selected_entity, mut selected_transform) in selected_card_query.iter_mut() {
+        if selected_entity != clicked_card {
+            selected_transform.translation.y -= 50.;
+            commands.entity(selected_entity).remove::<Selected>();
+        } else {
+            info!("Card was played");
+            commands.entity(clicked_card).despawn();
+        }
+    }
+    if let Ok(mut transform) = unselected_card_query.get_mut(clicked_card) {
+        transform.translation.y += 50.;
+        commands.entity(clicked_card).insert(Selected);
+    }
 }
 
 #[derive(Component, Default)]
@@ -64,32 +89,19 @@ struct MainCamera;
 struct Card;
 
 #[derive(Component, Default)]
-struct Draggable;
+struct Hand;
 
 #[derive(Component, Default)]
-struct Hoverable;
+struct Playable;
 
-#[derive(Resource, Default)]
-struct MousePosition(Vec2);
-
-#[derive(Event, Default)]
-struct StartHovering;
-
-#[derive(Event, Default)]
-struct StopHovering;
-
-#[derive(Event, Default)]
-struct StartDragging;
-
-#[derive(Event, Default)]
-struct StopDragging;
+#[derive(Component, Default)]
+struct Selected;
 
 #[derive(Bundle, Default)]
 struct Cardbundle {
-    draggable: PickableBundle,
-    hoverable: Hoverable,
     card: Card,
     sprite_bundle: SpriteBundle,
+    playable: Playable,
 }
 
 impl Cardbundle {
