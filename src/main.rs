@@ -1,10 +1,14 @@
 use bevy::prelude::*;
 use bevy_mod_picking::prelude::*;
+use shuftlib::{
+    common::{cards::Deck, hands::TrickTakingGame},
+    tressette::{TressetteCard, TressetteRules},
+};
 
 fn main() {
     App::new()
         .add_systems(Startup, setup_camera)
-        .add_systems(Startup, spawn_hand)
+        .add_systems(Startup, setup_hand)
         .add_plugins(DefaultPlugins)
         .add_plugins(DefaultPickingPlugins)
         .run();
@@ -14,7 +18,16 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn((Camera2dBundle::default(), MainCamera));
 }
 
-fn spawn_hand(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn setup_hand(commands: Commands, asset_server: Res<AssetServer>) {
+    let mut deck = Deck::italian();
+    deck.shuffle();
+    let cards: Vec<TressetteCard> = (0..TressetteRules::TRICKS)
+        .map(|_| deck.draw().unwrap().into())
+        .collect();
+    spawn_hand(&cards, commands, asset_server);
+}
+
+fn spawn_hand(cards: &[TressetteCard], mut commands: Commands, asset_server: Res<AssetServer>) {
     let hand_id = commands
         .spawn((
             Hand,
@@ -31,12 +44,15 @@ fn spawn_hand(mut commands: Commands, asset_server: Res<AssetServer>) {
             },
         ))
         .id();
-    let cards_ids: Vec<_> = (0..10)
-        .map(|i| {
+    let cards_ids: Vec<_> = cards
+        .iter()
+        .enumerate()
+        .map(|(i, card)| {
             commands
                 .spawn((
                     Cardbundle::default().with_sprite(SpriteBundle {
-                        texture: asset_server.load("cards/card-clubs-1.png"),
+                        texture: asset_server
+                            .load(format!("cards/card-clubs-{}.png", card.rank() as u8)),
                         transform: Transform {
                             translation: Vec3 {
                                 x: 100. * i as f32,
