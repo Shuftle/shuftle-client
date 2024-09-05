@@ -25,6 +25,7 @@
           buildInputs = [
             cargo-watch
             cargo-udeps
+            cargo-edit
             rust-analyzer
             rust-bin.nightly.latest.default
 
