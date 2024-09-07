@@ -27,7 +27,7 @@
             cargo-udeps
             cargo-edit
             rust-analyzer
-            rust-bin.nightly.latest.default
+            rust-bin.stable.latest.default
 
             udev alsa-lib vulkan-loader
             xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr # To use the x11 feature

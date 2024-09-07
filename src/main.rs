@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_mod_picking::prelude::*;
 use shuftlib::{
     common::{
-        cards::{Deck, FrenchRank, Suit},
+        cards::{Deck, FrenchRank, ItalianRank, Suit},
         hands::TrickTakingGame,
     },
     tressette::{TressetteCard, TressetteRules},
@@ -11,7 +11,7 @@ use shuftlib::{
 
 fn main() {
     App::new()
-        .add_systems(Startup, load_card_assets)
+        .add_systems(Startup, load_italian_assets)
         .add_systems(Startup, setup_camera)
         .add_systems(PostStartup, setup_hand)
         .add_plugins(DefaultPlugins)
@@ -23,22 +23,22 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn((Camera2dBundle::default(), MainCamera));
 }
 
-fn setup_hand(commands: Commands, french_assets: Res<FrenchAssets>) {
+fn setup_hand(commands: Commands, italian_assets: Res<ItalianAssets>) {
     let mut deck = Deck::italian();
     deck.shuffle();
     let cards: Vec<TressetteCard> = (0..TressetteRules::TRICKS)
         .map(|_| deck.draw().unwrap().into())
         .collect();
-    spawn_hand(&cards, commands, french_assets);
+    spawn_hand(&cards, commands, italian_assets);
 }
 
-fn load_card_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn load_french_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
     let mut french_assets = FrenchAssets(Vec::with_capacity(4));
     for suit in Suit::iter() {
-        let mut cards_in_suit = Vec::with_capacity(10);
+        let mut cards_in_suit = Vec::with_capacity(13);
         for rank in FrenchRank::iter() {
             let sprite_handle =
-                asset_server.load(format!("cards/card-{}-{}.png", suit, rank as u8));
+                asset_server.load(format!("cards/french/card-{}-{}.png", suit, rank as u8));
             cards_in_suit.push(sprite_handle);
         }
         french_assets.0.push(cards_in_suit);
@@ -47,7 +47,22 @@ fn load_card_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.insert_resource(french_assets);
 }
 
-fn spawn_hand(cards: &[TressetteCard], mut commands: Commands, french_assets: Res<FrenchAssets>) {
+fn load_italian_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let mut italian_assets = ItalianAssets(Vec::with_capacity(4));
+    for suit in Suit::iter() {
+        let mut cards_in_suit = Vec::with_capacity(10);
+        for rank in ItalianRank::iter() {
+            let sprite_handle =
+                asset_server.load(format!("cards/italian/card-{}-{}.png", suit, rank as u8));
+            cards_in_suit.push(sprite_handle);
+        }
+        italian_assets.0.push(cards_in_suit);
+    }
+
+    commands.insert_resource(italian_assets);
+}
+
+fn spawn_hand(cards: &[TressetteCard], mut commands: Commands, italian_assets: Res<ItalianAssets>) {
     let hand_id = commands
         .spawn((
             Hand,
@@ -73,7 +88,7 @@ fn spawn_hand(cards: &[TressetteCard], mut commands: Commands, french_assets: Re
                     Cardbundle::default()
                         .with_card(Card(*card))
                         .with_sprite(SpriteBundle {
-                            texture: french_assets.0[card.suit() as usize]
+                            texture: italian_assets.0[card.suit() as usize]
                                 [card.rank() as usize - 1]
                                 .clone_weak(),
                             transform: Transform {
@@ -113,7 +128,7 @@ fn select_play_card(
         }
     }
     if let Ok((mut transform, card)) = unselected_card_query.get_mut(clicked_card) {
-        info!("Card {} was played", card.0);
+        info!("Card {} was selected", card.0);
         transform.translation.y += 50.;
         commands.entity(clicked_card).insert(Selected);
     }
@@ -136,6 +151,9 @@ struct Selected;
 
 #[derive(Resource)]
 struct FrenchAssets(Vec<Vec<Handle<Image>>>);
+
+#[derive(Resource)]
+struct ItalianAssets(Vec<Vec<Handle<Image>>>);
 
 #[derive(Bundle, Default)]
 struct Cardbundle {
