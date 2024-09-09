@@ -1,5 +1,8 @@
+mod camera;
+
 use bevy::prelude::*;
 use bevy_mod_picking::prelude::*;
+use camera::CameraPlugin;
 use shuftlib::{
     common::{
         cards::{Deck, FrenchRank, ItalianRank, Suit},
@@ -12,15 +15,11 @@ use shuftlib::{
 fn main() {
     App::new()
         .add_systems(Startup, load_italian_assets)
-        .add_systems(Startup, setup_camera)
         .add_systems(PostStartup, setup_hand)
+        .add_plugins(CameraPlugin)
         .add_plugins(DefaultPlugins)
         .add_plugins(DefaultPickingPlugins)
         .run();
-}
-
-fn setup_camera(mut commands: Commands) {
-    commands.spawn((Camera2dBundle::default(), MainCamera));
 }
 
 fn setup_hand(commands: Commands, italian_assets: Res<ItalianAssets>) {
@@ -133,9 +132,6 @@ fn select_play_card(
         commands.entity(clicked_card).insert(Selected);
     }
 }
-
-#[derive(Component, Default)]
-struct MainCamera;
 
 #[derive(Component, Default)]
 struct Card(TressetteCard);
