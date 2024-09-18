@@ -2,19 +2,21 @@ use bevy::prelude::*;
 use bevy_mod_picking::{
     events::{Click, Pointer},
     prelude::{Listener, On},
+    DefaultPickingPlugins,
 };
 use shuftlib::{
     common::{cards::Deck, hands::TrickTakingGame},
     tressette::{TressetteCard, TressetteRules},
 };
 
-use crate::ItalianAssets;
+use crate::load_assets::ItalianAssets;
 
-pub struct PlayerHandPlugin;
+pub struct MainPlayer;
 
-impl Plugin for PlayerHandPlugin {
+impl Plugin for MainPlayer {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_systems(PostStartup, setup_hand);
+        app.add_systems(PostStartup, setup_hand)
+            .add_plugins(DefaultPickingPlugins);
     }
 }
 
@@ -53,7 +55,7 @@ fn spawn_hand(cards: &[TressetteCard], mut commands: Commands, italian_assets: R
                     Cardbundle::default()
                         .with_card(Card(*card))
                         .with_sprite(SpriteBundle {
-                            texture: italian_assets.0[card.suit() as usize]
+                            texture: italian_assets.assets()[card.suit() as usize]
                                 [card.rank() as usize - 1]
                                 .clone_weak(),
                             transform: Transform {
