@@ -7,7 +7,8 @@ pub struct LoadAssets;
 
 impl Plugin for LoadAssets {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load_italian_assets);
+        app.add_systems(Startup, load_italian_assets)
+            .add_systems(Startup, load_card_back);
     }
 }
 
@@ -41,20 +42,17 @@ fn load_italian_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.insert_resource(italian_assets);
 }
 
-#[derive(Resource)]
-pub struct FrenchAssets(Vec<Vec<Handle<Image>>>);
+fn load_card_back(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let sprite_handle = asset_server.load("cards/card-back1.png");
 
-impl FrenchAssets {
-    pub fn assets(&self) -> &[Vec<Handle<Image>>] {
-        &self.0
-    }
+    commands.insert_resource(CardBack(sprite_handle));
 }
 
 #[derive(Resource)]
-pub struct ItalianAssets(Vec<Vec<Handle<Image>>>);
+pub struct FrenchAssets(pub Vec<Vec<Handle<Image>>>);
 
-impl ItalianAssets {
-    pub fn assets(&self) -> &[Vec<Handle<Image>>] {
-        &self.0
-    }
-}
+#[derive(Resource)]
+pub struct ItalianAssets(pub Vec<Vec<Handle<Image>>>);
+
+#[derive(Resource)]
+pub struct CardBack(pub Handle<Image>);

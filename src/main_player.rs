@@ -33,17 +33,16 @@ fn spawn_hand(cards: &[TressetteCard], mut commands: Commands, italian_assets: R
     let hand_id = commands
         .spawn((
             Hand,
-            SpriteBundle {
-                transform: Transform {
-                    translation: Vec3 {
-                        x: -450.,
-                        y: -250.,
-                        ..default()
-                    },
+            Transform {
+                translation: Vec3 {
+                    x: -450.,
+                    y: -250.,
                     ..default()
                 },
                 ..default()
             },
+            InheritedVisibility::default(),
+            GlobalTransform::default(),
         ))
         .id();
     let cards_ids: Vec<_> = cards
@@ -55,7 +54,7 @@ fn spawn_hand(cards: &[TressetteCard], mut commands: Commands, italian_assets: R
                     Cardbundle::default()
                         .with_card(Card(*card))
                         .with_sprite(SpriteBundle {
-                            texture: italian_assets.assets()[card.suit() as usize]
+                            texture: italian_assets.0[card.suit() as usize]
                                 [card.rank() as usize - 1]
                                 .clone_weak(),
                             transform: Transform {
