@@ -35,7 +35,7 @@ fn spawn_hand(cards: &[TressetteCard], mut commands: Commands, italian_assets: R
             Hand,
             Transform {
                 translation: Vec3 {
-                    x: -450.,
+                    x: -200.,
                     y: -250.,
                     ..default()
                 },
@@ -59,7 +59,7 @@ fn spawn_hand(cards: &[TressetteCard], mut commands: Commands, italian_assets: R
                                 .clone_weak(),
                             transform: Transform {
                                 translation: Vec3 {
-                                    x: 100. * i as f32,
+                                    x: 50. * i as f32,
                                     ..default()
                                 },
                                 ..default()

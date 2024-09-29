@@ -2,46 +2,88 @@ use bevy::prelude::*;
 
 use crate::load_assets::CardBack;
 
+#[derive(Event)]
+pub struct SpawnOtherPlayer {
+    transform: Transform,
+}
+
 pub struct OtherPlayer;
 
 impl Plugin for OtherPlayer {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_systems(PostStartup, spawn_hand);
+        app.add_event::<SpawnOtherPlayer>()
+            .add_systems(PostStartup, spawn_hand)
+            .add_systems(PostStartup, test_spawn);
     }
 }
 
-fn spawn_hand(mut commands: Commands, card_back: Res<CardBack>) {
-    let hand_id = commands
-        .spawn((
-            Transform {
-                translation: Vec3 {
-                    x: -450.,
-                    y: 250.,
-                    ..default()
-                },
+fn test_spawn(mut event_writer: EventWriter<SpawnOtherPlayer>) {
+    // Spawn player 2
+    event_writer.send(SpawnOtherPlayer {
+        transform: Transform {
+            translation: Vec3 {
+                x: -100.,
+                y: 250.,
                 ..default()
             },
-            InheritedVisibility::default(),
-            GlobalTransform::default(),
-        ))
-        .id();
-    let cards_ids: Vec<_> = (0..10)
-        .into_iter()
-        .map(|i| {
-            commands
-                .spawn(SpriteBundle {
-                    transform: Transform {
-                        translation: Vec3 {
-                            x: 100. * i as f32,
+            ..default()
+        },
+    });
+    // Spawn player 1
+    event_writer.send(SpawnOtherPlayer {
+        transform: Transform {
+            translation: Vec3 {
+                x: -575.,
+                y: 0.,
+                ..default()
+            },
+            ..default()
+        },
+    });
+    // Spawn player 3
+    event_writer.send(SpawnOtherPlayer {
+        transform: Transform {
+            translation: Vec3 {
+                x: 350.,
+                y: 0.,
+                ..default()
+            },
+            ..default()
+        },
+    });
+}
+
+fn spawn_hand(
+    mut commands: Commands,
+    card_back: Res<CardBack>,
+    mut spawn_event: EventReader<SpawnOtherPlayer>,
+) {
+    for event in spawn_event.read() {
+        let hand_id = commands
+            .spawn((
+                event.transform,
+                InheritedVisibility::default(),
+                GlobalTransform::default(),
+            ))
+            .id();
+        let cards_ids: Vec<_> = (0..10)
+            .into_iter()
+            .map(|i| {
+                commands
+                    .spawn(SpriteBundle {
+                        transform: Transform {
+                            translation: Vec3 {
+                                x: 25. * i as f32,
+                                ..default()
+                            },
                             ..default()
                         },
+                        texture: card_back.as_ref().0.clone_weak(),
                         ..default()
-                    },
-                    texture: card_back.as_ref().0.clone_weak(),
-                    ..default()
-                })
-                .id()
-        })
-        .collect();
-    commands.entity(hand_id).push_children(&cards_ids);
+                    })
+                    .id()
+            })
+            .collect();
+        commands.entity(hand_id).push_children(&cards_ids);
+    }
 }
