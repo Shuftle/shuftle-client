@@ -18,7 +18,7 @@ impl Plugin for OtherPlayer {
 }
 
 fn test_spawn(mut event_writer: EventWriter<SpawnOtherPlayer>) {
-    // Spawn player 2
+    // Spawn player 2 (in front of the main player)
     event_writer.send(SpawnOtherPlayer {
         transform: Transform {
             translation: Vec3 {
@@ -26,10 +26,11 @@ fn test_spawn(mut event_writer: EventWriter<SpawnOtherPlayer>) {
                 y: 250.,
                 ..default()
             },
+            rotation: Quat::from_rotation_z((180f32).to_radians()),
             ..default()
         },
     });
-    // Spawn player 1
+    // Spawn player 1 (to the left of the main player)
     event_writer.send(SpawnOtherPlayer {
         transform: Transform {
             translation: Vec3 {
@@ -37,10 +38,11 @@ fn test_spawn(mut event_writer: EventWriter<SpawnOtherPlayer>) {
                 y: 0.,
                 ..default()
             },
+            rotation: Quat::from_rotation_z((-90f32).to_radians()),
             ..default()
         },
     });
-    // Spawn player 3
+    // Spawn player 3 (to the right of the main player)
     event_writer.send(SpawnOtherPlayer {
         transform: Transform {
             translation: Vec3 {
@@ -48,6 +50,7 @@ fn test_spawn(mut event_writer: EventWriter<SpawnOtherPlayer>) {
                 y: 0.,
                 ..default()
             },
+            rotation: Quat::from_rotation_z((90f32).to_radians()),
             ..default()
         },
     });
