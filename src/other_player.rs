@@ -73,20 +73,23 @@ fn spawn_hand(
             .into_iter()
             .map(|i| {
                 commands
-                    .spawn(SpriteBundle {
-                        transform: Transform {
+                    .spawn((
+                        Sprite {
+                            image: card_back.as_ref().0.clone_weak(),
+                            ..default()
+                        },
+                        Transform {
                             translation: Vec3 {
                                 x: 25. * i as f32,
+                                z: i as f32,
                                 ..default()
                             },
                             ..default()
                         },
-                        texture: card_back.as_ref().0.clone_weak(),
-                        ..default()
-                    })
+                    ))
                     .id()
             })
             .collect();
-        commands.entity(hand_id).push_children(&cards_ids);
+        commands.entity(hand_id).add_children(&cards_ids);
     }
 }

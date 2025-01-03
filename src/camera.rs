@@ -9,7 +9,7 @@ impl Plugin for CameraPlugin {
 }
 
 fn setup_camera(mut commands: Commands) {
-    commands.spawn((Camera2dBundle::default(), MainCamera));
+    commands.spawn((Camera2d::default(), MainCamera));
 }
 
 #[derive(Component, Default)]

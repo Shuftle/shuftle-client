@@ -1,9 +1,4 @@
 use bevy::prelude::*;
-use bevy_mod_picking::{
-    events::{Click, Pointer},
-    prelude::{Listener, On},
-    DefaultPickingPlugins,
-};
 use shuftlib::{
     common::{cards::Deck, hands::TrickTakingGame},
     tressette::{TressetteCard, TressetteRules},
@@ -15,8 +10,7 @@ pub struct MainPlayer;
 
 impl Plugin for MainPlayer {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_systems(PostStartup, setup_hand)
-            .add_plugins(DefaultPickingPlugins);
+        app.add_systems(PostStartup, setup_hand);
     }
 }
 
@@ -50,32 +44,32 @@ fn spawn_hand(cards: &[TressetteCard], mut commands: Commands, italian_assets: R
         .enumerate()
         .map(|(i, card)| {
             commands
-                .spawn((
-                    Cardbundle::default()
-                        .with_card(Card(*card))
-                        .with_sprite(SpriteBundle {
-                            texture: italian_assets.0[card.suit() as usize]
-                                [card.rank() as usize - 1]
-                                .clone_weak(),
-                            transform: Transform {
-                                translation: Vec3 {
-                                    x: 50. * i as f32,
-                                    ..default()
-                                },
-                                ..default()
-                            },
+                .spawn(Cardbundle {
+                    card: Card(*card),
+                    sprite: Sprite {
+                        image: italian_assets.0[card.suit() as usize][card.rank() as usize - 1]
+                            .clone_weak(),
+                        ..default()
+                    },
+                    transform: Transform {
+                        translation: Vec3 {
+                            x: 50. * i as f32,
+                            z: i as f32,
                             ..default()
-                        }),
-                    On::<Pointer<Click>>::run(select_play_card),
-                ))
+                        },
+                        ..default()
+                    },
+                    playable: Playable,
+                })
+                .observe(select_play_card)
                 .id()
         })
         .collect();
-    commands.entity(hand_id).push_children(&cards_ids);
+    commands.entity(hand_id).add_children(&cards_ids);
 }
 
 fn select_play_card(
-    click: Listener<Pointer<Click>>,
+    mut trigger: Trigger<Pointer<Click>>,
     mut selected_card_query: Query<
         (Entity, &mut Transform),
         (With<Card>, With<Playable>, With<Selected>),
@@ -83,7 +77,9 @@ fn select_play_card(
     mut unselected_card_query: Query<(&mut Transform, &Card), (With<Playable>, Without<Selected>)>,
     mut commands: Commands,
 ) {
-    let clicked_card = click.target;
+    trigger.propagate(false);
+    let click_event = trigger.event();
+    let clicked_card = click_event.target;
     for (selected_entity, mut selected_transform) in selected_card_query.iter_mut() {
         if selected_entity != clicked_card {
             selected_transform.translation.y -= 50.;
@@ -114,19 +110,8 @@ struct Selected;
 
 #[derive(Bundle, Default)]
 struct Cardbundle {
-    card: Card,
-    sprite_bundle: SpriteBundle,
-    playable: Playable,
-}
-
-impl Cardbundle {
-    fn with_sprite(mut self, sprite_bundle: SpriteBundle) -> Cardbundle {
-        self.sprite_bundle = sprite_bundle;
-        self
-    }
-
-    fn with_card(mut self, card: Card) -> Cardbundle {
-        self.card = card;
-        self
-    }
+    pub transform: Transform,
+    pub card: Card,
+    pub sprite: Sprite,
+    pub playable: Playable,
 }
