@@ -60,8 +60,12 @@ fn spawn_hand(cards: &[TressetteCard], mut commands: Commands, italian_assets: R
                         ..default()
                     },
                     playable: Playable,
+                    pickable: Pickable::default(),
                 })
                 .observe(select_play_card)
+                .observe(|trigger: Trigger<Pointer<Over>>| {
+                    println!("Hovering {}", trigger.target());
+                })
                 .id()
         })
         .collect();
@@ -77,6 +81,7 @@ fn select_play_card(
     mut unselected_card_query: Query<(&mut Transform, &Card), (With<Playable>, Without<Selected>)>,
     mut commands: Commands,
 ) {
+    println!("Clicked");
     trigger.propagate(false);
     let click_event = trigger.event();
     let clicked_card = click_event.target;
@@ -114,4 +119,5 @@ struct Cardbundle {
     pub card: Card,
     pub sprite: Sprite,
     pub playable: Playable,
+    pub pickable: Pickable,
 }

@@ -23,7 +23,7 @@
             pkg-config
           ];
           buildInputs = [
-            cargo-watch
+            bacon
             cargo-udeps
             cargo-edit
             rust-analyzer

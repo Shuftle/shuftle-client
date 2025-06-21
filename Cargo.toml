@@ -1,7 +1,7 @@
 [package]
 name = "shuftle-client-core"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 path = "src/lib.rs"
@@ -11,7 +11,7 @@ name = "shuftle-client"
 path = "src/main.rs"
 
 [dependencies]
-bevy = { version = "0.15", features = ["dynamic_linking"] }
+bevy = { version = "0.16", features = ["dynamic_linking", "bevy_dev_tools", "bevy_picking"] }
 shuftlib = {path = "./shuftlib"}
 
 [profile.dev]

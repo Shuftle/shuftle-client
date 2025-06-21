@@ -19,7 +19,7 @@ impl Plugin for OtherPlayer {
 
 fn test_spawn(mut event_writer: EventWriter<SpawnOtherPlayer>) {
     // Spawn player 2 (in front of the main player)
-    event_writer.send(SpawnOtherPlayer {
+    event_writer.write(SpawnOtherPlayer {
         transform: Transform {
             translation: Vec3 {
                 x: -100.,
@@ -31,7 +31,7 @@ fn test_spawn(mut event_writer: EventWriter<SpawnOtherPlayer>) {
         },
     });
     // Spawn player 1 (to the left of the main player)
-    event_writer.send(SpawnOtherPlayer {
+    event_writer.write(SpawnOtherPlayer {
         transform: Transform {
             translation: Vec3 {
                 x: -575.,
@@ -43,7 +43,7 @@ fn test_spawn(mut event_writer: EventWriter<SpawnOtherPlayer>) {
         },
     });
     // Spawn player 3 (to the right of the main player)
-    event_writer.send(SpawnOtherPlayer {
+    event_writer.write(SpawnOtherPlayer {
         transform: Transform {
             translation: Vec3 {
                 x: 350.,
@@ -70,7 +70,6 @@ fn spawn_hand(
             ))
             .id();
         let cards_ids: Vec<_> = (0..10)
-            .into_iter()
             .map(|i| {
                 commands
                     .spawn((
