@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
-use bevy::{ecs::system::SystemId, prelude::*};
+use bevy::{
+    ecs::system::SystemId,
+    prelude::*,
+    window::{PrimaryWindow, WindowResized},
+};
 use shuftlib::{
     IntoEnumIterator,
     common::{
@@ -32,6 +36,7 @@ pub struct GameLogic;
 impl Plugin for GameLogic {
     fn build(&self, app: &mut App) {
         app.add_systems(PostStartup, init_scene)
+            .add_systems(Update, anchor_players)
             .init_resource::<SetupGameId>()
             .init_state::<GameState>();
     }
@@ -41,7 +46,9 @@ fn init_scene(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     setup_game_sys: Res<SetupGameId>,
+    window: Query<&Window, With<PrimaryWindow>>,
 ) {
+    let window = window.iter().next().unwrap();
     // Load Italian assets
     let mut italian_assets = ItalianAssets(Vec::with_capacity(4));
     for suit in Suit::iter() {
@@ -63,8 +70,8 @@ fn init_scene(
     commands.spawn((
         Transform {
             translation: Vec3 {
-                x: -200.,
-                y: -250.,
+                x: -window.width() * 0.18,
+                y: -window.height() * 0.35,
                 ..default()
             },
             ..default()
@@ -81,8 +88,8 @@ fn init_scene(
     commands.spawn((
         Transform {
             translation: Vec3 {
-                x: -100.,
-                y: 250.,
+                x: window.width() * 0.18,
+                y: window.height() * 0.35,
                 ..default()
             },
             rotation: Quat::from_rotation_z((180f32).to_radians()),
@@ -98,8 +105,8 @@ fn init_scene(
     commands.spawn((
         Transform {
             translation: Vec3 {
-                x: -575.,
-                y: 0.,
+                x: -window.width() * 0.44,
+                y: window.height() * 0.3,
                 ..default()
             },
             rotation: Quat::from_rotation_z((-90f32).to_radians()),
@@ -115,8 +122,8 @@ fn init_scene(
     commands.spawn((
         Transform {
             translation: Vec3 {
-                x: 350.,
-                y: 0.,
+                x: window.width() * 0.44,
+                y: -window.height() * 0.3,
                 ..default()
             },
             rotation: Quat::from_rotation_z((90f32).to_radians()),
@@ -208,7 +215,7 @@ fn distribute_to_main(
                     card: Card(*card),
                     sprite: Sprite {
                         image: italian_assets.0[card.suit() as usize][card.rank() as usize - 1]
-                            .clone_weak(),
+                            .clone(),
                         ..default()
                     },
                     transform: Transform {
@@ -254,7 +261,7 @@ fn distribute_to_other(
                         ..default()
                     },
                     Sprite {
-                        image: card_back.0.clone_weak(),
+                        image: card_back.0.clone(),
                         ..default()
                     },
                 ))
@@ -265,8 +272,9 @@ fn distribute_to_other(
         .collect();
     commands.entity(entity).add_children(&cards_ids);
 }
+
 fn select_play_card(
-    mut trigger: Trigger<Pointer<Click>>,
+    mut trigger: On<Pointer<Click>>,
     mut selected_card_query: Query<
         (Entity, &mut Transform),
         (With<Card>, With<Playable>, With<Selected>),
@@ -276,7 +284,7 @@ fn select_play_card(
 ) {
     trigger.propagate(false);
     let click_event = trigger.event();
-    let clicked_card = click_event.target;
+    let clicked_card = click_event.entity;
     for (selected_entity, mut selected_transform) in selected_card_query.iter_mut() {
         if selected_entity != clicked_card {
             selected_transform.translation.y -= 50.;
@@ -288,6 +296,38 @@ fn select_play_card(
     if let Ok((mut transform, _card)) = unselected_card_query.get_mut(clicked_card) {
         transform.translation.y += 50.;
         commands.entity(clicked_card).insert(Selected);
+    }
+}
+
+fn anchor_players(
+    window: Query<&Window, With<PrimaryWindow>>,
+    mut players: Query<(&mut Transform, &Player)>,
+    mut resize_reader: MessageReader<WindowResized>,
+) {
+    let window = window.iter().next().unwrap();
+
+    for _event in resize_reader.read() {
+        for (mut transform, player) in players.iter_mut() {
+            match *player.id {
+                0 => {
+                    transform.translation.x = -window.width() * 0.18;
+                    transform.translation.y = -window.height() * 0.35;
+                }
+                1 => {
+                    transform.translation.x = -window.width() * 0.44;
+                    transform.translation.y = window.height() * 0.3;
+                }
+                2 => {
+                    transform.translation.x = window.width() * 0.18;
+                    transform.translation.y = window.height() * 0.35;
+                }
+                3 => {
+                    transform.translation.x = window.width() * 0.44;
+                    transform.translation.y = -window.height() * 0.3;
+                }
+                _ => panic!("This cannot happen"),
+            }
+        }
     }
 }
 

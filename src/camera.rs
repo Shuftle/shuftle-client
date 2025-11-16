@@ -9,8 +9,5 @@ impl Plugin for CameraPlugin {
 }
 
 fn setup_camera(mut commands: Commands) {
-    commands.spawn((Camera2d, MainCamera));
+    commands.spawn(Camera2d);
 }
-
-#[derive(Component, Default)]
-struct MainCamera;
