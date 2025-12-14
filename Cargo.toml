@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 bevy = { version = "0.17", features = ["dynamic_linking", "bevy_dev_tools", "bevy_picking"] }
-shuftlib = {path = "./shuftlib"}
+shuftlib = {path = "../shuftlib"}
 
 [profile.dev]
 opt-level = 1
