@@ -6,13 +6,15 @@ use bevy::{
     window::{PrimaryWindow, WindowResized},
 };
 use shuftlib::{
-    IntoEnumIterator,
-    common::{
-        cards::{Deck, ItalianRank, Suit},
-        hands::{PlayerId, TrickTakingGame},
+    core::{
+        Suit,
+        deck::Deck,
+        italian::{ItalianCard, ItalianRank},
     },
-    tressette::{CARDS_AT_TIME, TressetteCard, TressetteRules},
+    tressette::TressetteCard,
+    trick_taking::{PLAYERS, PlayerId},
 };
+use strum::IntoEnumIterator;
 
 #[derive(States, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum GameState {
@@ -77,7 +79,7 @@ fn init_scene(
             ..default()
         },
         Player {
-            id: PlayerId::new(0).unwrap(),
+            id: PlayerId::PLAYER_0,
             cards_counter: 0,
         },
         InheritedVisibility::default(),
@@ -96,7 +98,7 @@ fn init_scene(
             ..default()
         },
         Player {
-            id: PlayerId::new(2).unwrap(),
+            id: PlayerId::PLAYER_2,
             cards_counter: 0,
         },
     ));
@@ -113,7 +115,7 @@ fn init_scene(
             ..default()
         },
         Player {
-            id: PlayerId::new(1).unwrap(),
+            id: PlayerId::PLAYER_1,
             cards_counter: 0,
         },
     ));
@@ -130,13 +132,15 @@ fn init_scene(
             ..default()
         },
         Player {
-            id: PlayerId::new(3).unwrap(),
+            id: PlayerId::PLAYER_3,
             cards_counter: 0,
         },
     ));
 
     // Create deck.
-    let deck = Deck::italian().into();
+    let deck_temp: Deck<ItalianCard> = Deck::italian();
+    let deck: Deck<TressetteCard> =
+        Deck::from(deck_temp.into_iter().map(|c| c.into()).collect::<Vec<_>>());
     commands.insert_resource(DeckResource(deck));
 
     // Call system to setup game.
@@ -166,14 +170,17 @@ fn setup_game(
     deck.0.shuffle();
 
     // Distribute cards.
-    let mut players = HashMap::new();
+    let mut players: HashMap<usize, _> = HashMap::new();
     for (entity, player) in query.iter_mut() {
-        players.insert(*player.id, (entity, player));
+        players.insert(player.id.as_usize(), (entity, player));
     }
 
+    const CARDS_AT_TIME: usize = 5;
     for _ in 0..2 {
-        for i in 0..TressetteRules::PLAYERS {
-            let cards = deck.0.draw_n(CARDS_AT_TIME);
+        for i in 0..PLAYERS {
+            let cards = (0..CARDS_AT_TIME)
+                .map(|_| deck.0.draw().unwrap())
+                .collect::<Vec<_>>();
             let (entity, player) = players.get_mut(&i).unwrap();
             if i == 0 {
                 distribute_to_main(
@@ -308,7 +315,7 @@ fn anchor_players(
 
     for _event in resize_reader.read() {
         for (mut transform, player) in players.iter_mut() {
-            match *player.id {
+            match player.id.as_usize() {
                 0 => {
                     transform.translation.x = -window.width() * 0.18;
                     transform.translation.y = -window.height() * 0.35;
@@ -351,7 +358,7 @@ struct Cardbundle {
 
 #[derive(Component)]
 struct Player {
-    id: PlayerId<{ TressetteRules::PLAYERS }>,
+    id: PlayerId,
     cards_counter: usize,
 }
 

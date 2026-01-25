@@ -11,8 +11,9 @@ name = "shuftle-client"
 path = "src/main.rs"
 
 [dependencies]
-bevy = { version = "0.17", features = ["dynamic_linking", "bevy_dev_tools", "bevy_picking"] }
+bevy = { version = "0.18", features = ["dynamic_linking", "bevy_dev_tools", "bevy_picking"] }
 shuftlib = {path = "../shuftlib"}
+strum = { version = "0.27", features = ["derive"] }
 
 [profile.dev]
 opt-level = 1
