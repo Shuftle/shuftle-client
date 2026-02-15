@@ -2,6 +2,13 @@
 name = "shuftle-client-core"
 version = "0.1.0"
 edition = "2024"
+authors = ["Sebastiano Giordano"]
+categories = ["game-development"]
+description = "A collection of classical card games"
+keywords = ["cards", "card_games"]
+license = "AGPL-3.0-only"
+readme = "README.md"
+repository = "https://github.com/shuftle/shuftle-client"
 
 [lib]
 path = "src/lib.rs"
@@ -11,9 +18,10 @@ name = "shuftle-client"
 path = "src/main.rs"
 
 [dependencies]
-bevy = { version = "0.18", features = ["dynamic_linking", "bevy_dev_tools", "bevy_picking"] }
-shuftlib = {path = "../shuftlib"}
+bevy = { version = "0.18", features = ["dynamic_linking", "bevy_picking"] }
+shuftlib = "0.2"
 strum = { version = "0.27", features = ["derive"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [profile.dev]
 opt-level = 1
@@ -29,3 +37,7 @@ lto = "thin"
 inherits = "release"
 opt-level = "s"
 strip = "debuginfo"
+
+[lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"

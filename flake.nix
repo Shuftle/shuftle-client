@@ -15,6 +15,9 @@
         pkgs = import nixpkgs {
           inherit system overlays;
         };
+        rust = pkgs.rust-bin.stable.latest.default.override {
+          targets = [ "wasm32-unknown-unknown" ];
+        };
       in
       with pkgs;
       {
@@ -23,15 +26,17 @@
             pkg-config
           ];
           buildInputs = [
-            bacon
-            cargo-udeps
-            cargo-edit
-            rust-analyzer
-            rust-bin.stable.latest.default
+              bacon
+              cargo-machete
+              cargo-edit
+              cargo-deny
+              trunk
+              rust-analyzer
+              rust
 
-            udev alsa-lib vulkan-loader
-            xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr # To use the x11 feature
-            libxkbcommon wayland # To use the wayland feature
+              udev alsa-lib vulkan-loader
+              libX11 libXcursor libXi libXrandr # To use the x11 feature
+              libxkbcommon wayland # To use the wayland feature
           ];
           LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
         };
