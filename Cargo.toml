@@ -21,7 +21,6 @@ path = "src/main.rs"
 bevy = { version = "0.18", features = ["dynamic_linking", "bevy_picking"] }
 shuftlib = "0.2"
 strum = { version = "0.27", features = ["derive"] }
-getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [profile.dev]
 opt-level = 1
