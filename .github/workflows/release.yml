@@ -25,6 +25,7 @@ jobs:
           lfs: ${{ env.use_git_lfs }}
       - name: Download assets
         run: |
+          mkdir -p assets
           sudo apt-get update && sudo apt-get install -y megatools
           megatools dl --path assets https://mega.nz/folder/DOZ1HCTb#sD5HuQYbZpOx2hS0apSXhQ
       - uses: dtolnay/rust-toolchain@stable
@@ -78,6 +79,7 @@ jobs:
           lfs: ${{ env.use_git_lfs }}
       - name: Download assets
         run: |
+          mkdir -p assets
           sudo apt-get update && sudo apt-get install -y megatools
           megatools dl --path assets https://mega.nz/folder/DOZ1HCTb#sD5HuQYbZpOx2hS0apSXhQ
       - uses: dtolnay/rust-toolchain@stable
@@ -131,6 +133,7 @@ jobs:
           lfs: ${{ env.use_git_lfs }}
       - name: Download assets
         run: |
+          mkdir assets
           Invoke-WebRequest -Uri https://mega.nz/MEGAcmdSetup64.exe -OutFile MEGAcmdSetup.exe
           Start-Process -FilePath .\MEGAcmdSetup.exe -ArgumentList '/S' -Wait
           mega-get https://mega.nz/folder/DOZ1HCTb#sD5HuQYbZpOx2hS0apSXhQ assets
@@ -182,6 +185,7 @@ jobs:
           lfs: ${{ env.use_git_lfs }}
       - name: Download assets
         run: |
+          mkdir -p assets
           curl -L -o MEGAcmd.dmg https://mega.nz/MEGAcmdSetup.dmg
           hdiutil attach MEGAcmd.dmg
           sudo installer -pkg /Volumes/MEGAcmd/MEGAcmd.pkg -target /
@@ -235,6 +239,7 @@ jobs:
           lfs: ${{ env.use_git_lfs }}
       - name: Download assets
         run: |
+          mkdir -p assets
           curl -L -o MEGAcmd.dmg https://mega.nz/MEGAcmdSetup.dmg
           hdiutil attach MEGAcmd.dmg
           sudo installer -pkg /Volumes/MEGAcmd/MEGAcmd.pkg -target /

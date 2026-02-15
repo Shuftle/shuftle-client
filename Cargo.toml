@@ -14,7 +14,7 @@ repository = "https://github.com/shuftle/shuftle-client"
 path = "src/lib.rs"
 
 [[bin]]
-name = "shuftle-client"
+name = "shuftle"
 path = "src/main.rs"
 
 [dependencies]
