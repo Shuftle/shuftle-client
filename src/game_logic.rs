@@ -4,7 +4,7 @@ use bevy::{
     ecs::schedule::common_conditions::any_with_component,
     ecs::system::SystemId,
     prelude::*,
-    text::{Font, Justify, TextFont, TextLayout},
+    text::{Font, TextFont},
     ui::{Interaction, Node, PositionType, Val},
     window::PrimaryWindow,
 };
@@ -36,7 +36,7 @@ const EDGE_MARGIN: u32 = 60;
 const CARD_WIDTH: u32 = 96;
 
 /// Height of the card sprite
-const CARD_HEIGHT: f32 = 50.;
+const CARD_HEIGHT: u32 = 50;
 
 /// Number of cards per player
 const CARDS_PER_PLAYER: usize = 10;
