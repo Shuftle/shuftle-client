@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, f32::consts::PI};
 
 use bevy::{
     ecs::schedule::common_conditions::any_with_component,
@@ -21,13 +21,25 @@ struct GameState(Game);
 #[derive(Resource, Default)]
 struct FontHandle(Handle<Font>);
 
-// Positions for played cards in the trick (center of table, clockwise diamond)
+/// Positions for played cards in the trick (center of table, clockwise diamond)
 const TRICK_POSITIONS: [(f32, f32); 4] = [
     (0.0, -50.0), // Player 0 (bottom)
     (50.0, 0.0),  // Player 1 (right)
     (0.0, 50.0),  // Player 2 (top)
     (-50.0, 0.0), // Player 3 (left)
 ];
+
+/// Distance between the visual representation of the player and the edge of the screen
+const EDGE_MARGIN: u32 = 60;
+
+/// Width of the card sprite
+const CARD_WIDTH: u32 = 96;
+
+/// Height of the card sprite
+const CARD_HEIGHT: f32 = 50.;
+
+/// Number of cards per player
+const CARDS_PER_PLAYER: usize = 10;
 
 #[derive(States, Debug, Clone, Copy, Default, Eq, PartialEq, Hash)]
 pub enum PlayerTurn {
@@ -91,144 +103,49 @@ fn init_scene(
     let sprite_handle = asset_server.load("cards/card-back1.png");
     commands.insert_resource(CardBack(sprite_handle));
 
-    // Spawn POV player
-    commands
-        .spawn((
-            Name::new("Player 0"),
-            Transform {
-                translation: Vec3 {
-                    x: -window.width() * 0.18,
-                    y: -window.height() * 0.35,
-                    ..default()
-                },
-                ..default()
-            },
-            Player {
-                id: PlayerId::PLAYER_0,
-                cards_counter: 0,
-            },
-            Visibility::default(),
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text2d("Player 0".to_owned()),
-                TextLayout::new_with_justify(Justify::Center),
-                TextFont {
-                    font: font_handle.clone(),
-                    font_size: 24.0,
-                    ..default()
-                },
-                Transform::from_xyz(0.0, 100.0, 1.0),
-            ));
-        });
+    // Spawn POV player (bottom)
+    commands.spawn((
+        Name::new("Player 0"),
+        pov_player_transform(window),
+        Player {
+            id: PlayerId::PLAYER_0,
+            cards_counter: 0,
+        },
+        Visibility::default(),
+    ));
 
-    // Spawn player 1
-    commands
-        .spawn((
-            Name::new("Player 1"),
-            Transform {
-                translation: Vec3 {
-                    x: window.width() * 0.44,
-                    y: -window.height() * 0.3,
-                    ..default()
-                },
-                rotation: Quat::from_rotation_z((90f32).to_radians()),
-                ..default()
-            },
-            Player {
-                id: PlayerId::PLAYER_1,
-                cards_counter: 0,
-            },
-            Visibility::default(),
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text2d("Player 1".to_owned()),
-                TextLayout::new_with_justify(Justify::Center),
-                TextFont {
-                    font: font_handle.clone(),
-                    font_size: 24.0,
-                    ..default()
-                },
-                Transform {
-                    translation: Vec3::new(-70.0, 60.0, 1.0),
-                    rotation: Quat::from_rotation_z(-90f32.to_radians()),
-                    ..default()
-                },
-            ));
-        });
+    // Spawn player 1 (right)
+    commands.spawn((
+        Name::new("Player 1"),
+        player1_tranform(window),
+        Player {
+            id: PlayerId::PLAYER_1,
+            cards_counter: 0,
+        },
+        Visibility::default(),
+    ));
 
     // Spawn player 2
-    commands
-        .spawn((
-            Name::new("Player 2"),
-            Transform {
-                translation: Vec3 {
-                    x: window.width() * 0.18,
-                    y: window.height() * 0.35,
-                    ..default()
-                },
-                rotation: Quat::from_rotation_z((180f32).to_radians()),
-                ..default()
-            },
-            Player {
-                id: PlayerId::PLAYER_2,
-                cards_counter: 0,
-            },
-            Visibility::default(),
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text2d("Player 2".to_owned()),
-                TextLayout::new_with_justify(Justify::Center),
-                TextFont {
-                    font: font_handle.clone(),
-                    font_size: 24.0,
-                    ..default()
-                },
-                Transform {
-                    translation: Vec3::new(0.0, 100.0, 1.0),
-                    rotation: Quat::from_rotation_z(180f32.to_radians()),
-                    ..default()
-                },
-            ));
-        });
+    commands.spawn((
+        Name::new("Player 2"),
+        player2_transform(window),
+        Player {
+            id: PlayerId::PLAYER_2,
+            cards_counter: 0,
+        },
+        Visibility::default(),
+    ));
 
     // Spawn player 3
-    commands
-        .spawn((
-            Name::new("Player 3"),
-            Transform {
-                translation: Vec3 {
-                    x: -window.width() * 0.44,
-                    y: window.height() * 0.3,
-                    ..default()
-                },
-                rotation: Quat::from_rotation_z((-90f32).to_radians()),
-                ..default()
-            },
-            Player {
-                id: PlayerId::PLAYER_3,
-                cards_counter: 0,
-            },
-            Visibility::default(),
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text2d("Player 3".to_owned()),
-                TextLayout::new_with_justify(Justify::Center),
-                TextFont {
-                    font: font_handle.clone(),
-                    font_size: 24.0,
-                    ..default()
-                },
-                Transform {
-                    translation: Vec3::new(-70.0, 60.0, 1.0),
-                    rotation: Quat::from_rotation_z(90f32.to_radians()),
-                    ..default()
-                },
-            ));
-        });
+    commands.spawn((
+        Name::new("Player 3"),
+        player3_transform(window),
+        Player {
+            id: PlayerId::PLAYER_3,
+            cards_counter: 0,
+        },
+        Visibility::default(),
+    ));
 
     // Spawn score display
     commands.spawn((
@@ -252,6 +169,50 @@ fn init_scene(
     commands.run_system(setup_game_sys.0);
 }
 
+fn player3_transform(window: &Window) -> Transform {
+    Transform {
+        translation: Vec3 {
+            x: -window.width() * 0.5 + EDGE_MARGIN as f32 + CARD_HEIGHT as f32,
+            y: 5. * CARD_WIDTH as f32 * 0.5,
+            ..default()
+        },
+        ..default()
+    }
+}
+
+fn player2_transform(window: &Window) -> Transform {
+    Transform {
+        translation: Vec3 {
+            x: -5. * CARD_WIDTH as f32 * 0.5,
+            y: window.height() * 0.5 - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 * 0.5,
+            ..default()
+        },
+        ..default()
+    }
+}
+
+fn player1_tranform(window: &Window) -> Transform {
+    Transform {
+        translation: Vec3 {
+            x: window.width() * 0.5 - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 * 0.5,
+            y: CARD_WIDTH as f32 * 0.5 * 5.,
+            ..default()
+        },
+        ..default()
+    }
+}
+
+fn pov_player_transform(window: &Window) -> Transform {
+    Transform {
+        translation: Vec3 {
+            x: 0.0,
+            y: -window.height() * 0.5 + EDGE_MARGIN as f32 + CARD_HEIGHT as f32 * 0.5,
+            ..default()
+        },
+        ..default()
+    }
+}
+
 /// System called every frame to position players at screen edges.
 fn update_player_positions(
     window: Query<&Window, With<PrimaryWindow>>,
@@ -262,20 +223,24 @@ fn update_player_positions(
     for (mut transform, player) in players.iter_mut() {
         match player.id.as_usize() {
             0 => {
-                transform.translation.x = -window.width() * 0.18;
-                transform.translation.y = -window.height() * 0.35;
+                transform.translation.x = 0.0;
+                transform.translation.y =
+                    -window.height() * 0.5 + EDGE_MARGIN as f32 + CARD_HEIGHT as f32 * 0.5;
             }
             1 => {
-                transform.translation.x = window.width() * 0.44;
-                transform.translation.y = -window.height() * 0.3;
+                transform.translation.x =
+                    window.width() * 0.5 - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 * 0.5;
+                transform.translation.y = 0.0;
             }
             2 => {
-                transform.translation.x = window.width() * 0.18;
-                transform.translation.y = window.height() * 0.35;
+                transform.translation.x = 0.0;
+                transform.translation.y =
+                    window.height() * 0.5 - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 * 0.5;
             }
             3 => {
-                transform.translation.x = -window.width() * 0.44;
-                transform.translation.y = window.height() * 0.3;
+                transform.translation.x =
+                    -window.width() * 0.5 + EDGE_MARGIN as f32 + CARD_HEIGHT as f32 * 0.5;
+                transform.translation.y = 0.0;
             }
             _ => panic!("This cannot happen"),
         }
@@ -329,6 +294,7 @@ fn setup_game(
                 *entity,
                 cards,
                 &mut player.cards_counter,
+                i,
             );
         }
     }
@@ -346,21 +312,26 @@ fn distribute_to_pov(
     cards: Vec<TressetteCard>,
     card_counter: &mut usize,
 ) {
+    let spacing = CARD_WIDTH as f32 * 0.5;
+    let num_cards = CARDS_PER_PLAYER;
+    let total_width = (num_cards - 1) as f32 * spacing;
+    let center_offset = total_width / 2.0;
+
     let cards_ids: Vec<_> = cards
         .iter()
         .map(|card| {
-            const CARD_SPACING: f32 = 50.;
+            let image_handle =
+                italian_assets.0[card.suit() as usize][card.rank() as usize - 1].clone();
             let id = commands
                 .spawn(Cardbundle {
                     card: Card(*card),
                     sprite: Sprite {
-                        image: italian_assets.0[card.suit() as usize][card.rank() as usize - 1]
-                            .clone(),
+                        image: image_handle,
                         ..default()
                     },
                     transform: Transform {
                         translation: Vec3 {
-                            x: CARD_SPACING * *card_counter as f32,
+                            x: spacing * *card_counter as f32 - center_offset,
                             z: *card_counter as f32,
                             ..default()
                         },
@@ -385,20 +356,50 @@ fn distribute_to_other(
     entity: Entity,
     cards: Vec<TressetteCard>,
     card_counter: &mut usize,
+    player_id: usize,
 ) {
+    let spacing = CARD_WIDTH as f32 * 0.5;
+    let num_cards = CARDS_PER_PLAYER;
+    let total_width = (num_cards - 1) as f32 * spacing;
+    let center_offset = total_width / 2.0;
+
     let cards_ids: Vec<_> = cards
         .iter()
         .map(|card| {
-            const CARD_SPACING: f32 = 50.;
+            let card_pos = spacing * *card_counter as f32;
+            let (rotation, translation) = match player_id {
+                1 => (
+                    Quat::from_rotation_z(PI * 0.5),
+                    Vec3 {
+                        x: 0.,
+                        y: card_pos - center_offset,
+                        z: *card_counter as f32,
+                    },
+                ),
+                2 => (
+                    Quat::IDENTITY,
+                    Vec3 {
+                        x: -card_pos + center_offset,
+                        y: 0.,
+                        z: *card_counter as f32,
+                    },
+                ),
+                3 => (
+                    Quat::from_rotation_z(-PI * 0.5),
+                    Vec3 {
+                        x: 0.,
+                        y: -card_pos + center_offset,
+                        z: *card_counter as f32,
+                    },
+                ),
+                _ => panic!("This should never happen"),
+            };
             let id = commands
                 .spawn((
                     Card(*card),
                     Transform {
-                        translation: Vec3 {
-                            x: CARD_SPACING * *card_counter as f32,
-                            z: *card_counter as f32,
-                            ..default()
-                        },
+                        translation,
+                        rotation,
                         ..default()
                     },
                     Sprite {
@@ -413,6 +414,7 @@ fn distribute_to_other(
         .collect();
     commands.entity(entity).add_children(&cards_ids);
 }
+const CARD_SPEED: f32 = 1000.0;
 
 /// This is called when the POV player clicks on one of their cards.
 fn select_play_card(
@@ -469,7 +471,7 @@ fn select_play_card(
                         .remove_parent_in_place()
                         .insert(MovingTo {
                             target: Vec3::new(x, y, 10.0),
-                            speed: 200.0,
+                            speed: CARD_SPEED,
                             on_arrival: Some(handle_effect_id.0),
                         });
                 }
@@ -698,7 +700,7 @@ fn non_pov_play(
                         .insert(CardInPlay)
                         .insert(MovingTo {
                             target: Vec3::new(x, y, 10.0),
-                            speed: 200.0,
+                            speed: CARD_SPEED,
                             on_arrival: Some(handle_effect_id.0),
                         });
                 }
