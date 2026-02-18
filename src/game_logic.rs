@@ -1,12 +1,11 @@
 use std::{collections::HashMap, f32::consts::PI};
 
 use bevy::{
-    ecs::schedule::common_conditions::any_with_component,
-    ecs::system::SystemId,
+    ecs::{schedule::common_conditions::any_with_component, system::SystemId},
     prelude::*,
     text::{Font, TextFont},
     ui::{Interaction, Node, PositionType, Val},
-    window::PrimaryWindow,
+    window::{PrimaryWindow, WindowResized},
 };
 use shuftlib::{
     core::{Suit, italian::ItalianRank},
@@ -215,34 +214,37 @@ fn pov_player_transform(window: &Window) -> Transform {
 
 /// System called every frame to position players at screen edges.
 fn update_player_positions(
-    window: Query<&Window, With<PrimaryWindow>>,
     mut players: Query<(&mut Transform, &Player)>,
+    mut resize_reader: MessageReader<WindowResized>,
+    camera: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
 ) {
-    let window = window.iter().next().unwrap();
-
-    for (mut transform, player) in players.iter_mut() {
-        match player.id.as_usize() {
-            0 => {
-                transform.translation.x = 0.0;
-                transform.translation.y =
-                    -window.height() * 0.5 + EDGE_MARGIN as f32 + CARD_HEIGHT as f32 * 0.5;
-            }
-            1 => {
-                transform.translation.x =
-                    window.width() * 0.5 - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 * 0.5;
-                transform.translation.y = 0.0;
-            }
-            2 => {
-                transform.translation.x = 0.0;
-                transform.translation.y =
-                    window.height() * 0.5 - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 * 0.5;
-            }
-            3 => {
-                transform.translation.x =
-                    -window.width() * 0.5 + EDGE_MARGIN as f32 + CARD_HEIGHT as f32 * 0.5;
-                transform.translation.y = 0.0;
-            }
-            _ => panic!("This cannot happen"),
+    let (camera, camera_transform) = camera.single().unwrap();
+    for event in resize_reader.read() {
+        for (mut transform, player) in players.iter_mut() {
+            let viewport_point = match player.id.as_usize() {
+                0 => Vec2::new(
+                    event.width / 2.0,
+                    event.height - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 / 2.0,
+                ),
+                1 => Vec2::new(
+                    event.width - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 / 2.0,
+                    event.height / 2.0,
+                ),
+                2 => Vec2::new(
+                    event.width / 2.0,
+                    EDGE_MARGIN as f32 + CARD_HEIGHT as f32 / 2.0,
+                ),
+                3 => Vec2::new(
+                    EDGE_MARGIN as f32 + CARD_HEIGHT as f32 / 2.0,
+                    event.height / 2.0,
+                ),
+                _ => panic!("This cannot happen"),
+            };
+            let world_pos = camera
+                .viewport_to_world_2d(camera_transform, viewport_point)
+                .unwrap();
+            transform.translation.x = world_pos.x;
+            transform.translation.y = world_pos.y;
         }
     }
 }

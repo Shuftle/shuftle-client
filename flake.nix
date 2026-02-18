@@ -30,7 +30,7 @@
               cargo-machete
               cargo-edit
               cargo-deny
-              trunk
+              wasm-bindgen-cli
               rust-analyzer
               rust
 
