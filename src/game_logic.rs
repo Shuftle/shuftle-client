@@ -58,7 +58,7 @@ impl Plugin for GameLogic {
             .add_systems(
                 Update,
                 (
-                    update_player_positions,
+                    update_player_positions.run_if(on_message::<WindowResized>),
                     move_to_target.run_if(any_with_component::<MovingTo>),
                     handle_restart_button,
                 ),
@@ -215,7 +215,9 @@ fn update_player_positions(
     mut players: Query<(&mut Transform, &Player)>,
     mut resize_reader: MessageReader<WindowResized>,
 ) {
+    info!("Calling update player positions");
     for event in resize_reader.read() {
+        info!("Actually updating");
         for (mut transform, player) in players.iter_mut() {
             transform.translation =
                 player_position(event.width, event.height, player.id.as_usize());
