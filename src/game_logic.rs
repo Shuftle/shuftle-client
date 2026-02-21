@@ -9,7 +9,7 @@ use bevy::{
 };
 use shuftlib::{
     core::{Suit, italian::ItalianRank},
-    tressette::{Game, TressetteCard},
+    tressette::{Game, MoveEffect, TressetteCard},
     trick_taking::{PLAYERS, PlayerId},
 };
 use strum::IntoEnumIterator;
@@ -63,12 +63,16 @@ impl Plugin for GameLogic {
                     handle_restart_button,
                 ),
             )
-            .add_systems(Last, despawn_marked)
+            .add_systems(Last, despawn_marked.run_if(any_with_component::<ToDespawn>))
             .init_resource::<SetupGameId>()
             .init_resource::<NonPovPlayId>()
             .init_resource::<HandleEffectId>()
             .init_resource::<CollectCardsId>()
-            .insert_resource(GameState(Game::new()));
+            .init_resource::<MarkForDespawnAndContinueId>()
+            .init_resource::<CardsBeingCollected>()
+            .init_resource::<CollectionTimer>()
+            .insert_resource(GameState(Game::new()))
+            .add_systems(Update, check_collection_timer);
     }
 }
 
@@ -105,7 +109,10 @@ fn init_scene(
     // Spawn POV player (bottom)
     commands.spawn((
         Name::new("Player 0"),
-        pov_player_transform(window),
+        Transform {
+            translation: player_position(window.width(), window.height(), 0),
+            ..default()
+        },
         Player {
             id: PlayerId::PLAYER_0,
             cards_counter: 0,
@@ -116,7 +123,10 @@ fn init_scene(
     // Spawn player 1 (right)
     commands.spawn((
         Name::new("Player 1"),
-        player1_tranform(window),
+        Transform {
+            translation: player_position(window.width(), window.height(), 1),
+            ..default()
+        },
         Player {
             id: PlayerId::PLAYER_1,
             cards_counter: 0,
@@ -127,7 +137,10 @@ fn init_scene(
     // Spawn player 2
     commands.spawn((
         Name::new("Player 2"),
-        player2_transform(window),
+        Transform {
+            translation: player_position(window.width(), window.height(), 2),
+            ..default()
+        },
         Player {
             id: PlayerId::PLAYER_2,
             cards_counter: 0,
@@ -138,7 +151,10 @@ fn init_scene(
     // Spawn player 3
     commands.spawn((
         Name::new("Player 3"),
-        player3_transform(window),
+        Transform {
+            translation: player_position(window.width(), window.height(), 3),
+            ..default()
+        },
         Player {
             id: PlayerId::PLAYER_3,
             cards_counter: 0,
@@ -168,47 +184,29 @@ fn init_scene(
     commands.run_system(setup_game_sys.0);
 }
 
-fn player3_transform(window: &Window) -> Transform {
-    Transform {
-        translation: Vec3 {
-            x: -window.width() * 0.5 + EDGE_MARGIN as f32 + CARD_HEIGHT as f32,
-            y: 5. * CARD_WIDTH as f32 * 0.5,
-            ..default()
-        },
-        ..default()
-    }
-}
-
-fn player2_transform(window: &Window) -> Transform {
-    Transform {
-        translation: Vec3 {
-            x: -5. * CARD_WIDTH as f32 * 0.5,
-            y: window.height() * 0.5 - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 * 0.5,
-            ..default()
-        },
-        ..default()
-    }
-}
-
-fn player1_tranform(window: &Window) -> Transform {
-    Transform {
-        translation: Vec3 {
-            x: window.width() * 0.5 - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 * 0.5,
-            y: CARD_WIDTH as f32 * 0.5 * 5.,
-            ..default()
-        },
-        ..default()
-    }
-}
-
-fn pov_player_transform(window: &Window) -> Transform {
-    Transform {
-        translation: Vec3 {
+fn player_position(width: f32, height: f32, player_id: usize) -> Vec3 {
+    match player_id {
+        0 => Vec3 {
             x: 0.0,
-            y: -window.height() * 0.5 + EDGE_MARGIN as f32 + CARD_HEIGHT as f32 * 0.5,
-            ..default()
+            y: -height * 0.5 + EDGE_MARGIN as f32 + CARD_HEIGHT as f32 * 0.5,
+            z: 0.0,
         },
-        ..default()
+        1 => Vec3 {
+            x: width * 0.5 - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 * 0.5,
+            y: 0.0,
+            z: 0.0,
+        },
+        2 => Vec3 {
+            x: 0.0,
+            y: height * 0.5 - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 * 0.5,
+            z: 0.0,
+        },
+        3 => Vec3 {
+            x: -width * 0.5 + EDGE_MARGIN as f32 + CARD_HEIGHT as f32 * 0.5,
+            y: 0.0,
+            z: 0.0,
+        },
+        _ => panic!("Invalid player id"),
     }
 }
 
@@ -216,35 +214,11 @@ fn pov_player_transform(window: &Window) -> Transform {
 fn update_player_positions(
     mut players: Query<(&mut Transform, &Player)>,
     mut resize_reader: MessageReader<WindowResized>,
-    camera: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
 ) {
-    let (camera, camera_transform) = camera.single().unwrap();
     for event in resize_reader.read() {
         for (mut transform, player) in players.iter_mut() {
-            let viewport_point = match player.id.as_usize() {
-                0 => Vec2::new(
-                    event.width / 2.0,
-                    event.height - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 / 2.0,
-                ),
-                1 => Vec2::new(
-                    event.width - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 / 2.0,
-                    event.height / 2.0,
-                ),
-                2 => Vec2::new(
-                    event.width / 2.0,
-                    EDGE_MARGIN as f32 + CARD_HEIGHT as f32 / 2.0,
-                ),
-                3 => Vec2::new(
-                    EDGE_MARGIN as f32 + CARD_HEIGHT as f32 / 2.0,
-                    event.height / 2.0,
-                ),
-                _ => panic!("This cannot happen"),
-            };
-            let world_pos = camera
-                .viewport_to_world_2d(camera_transform, viewport_point)
-                .unwrap();
-            transform.translation.x = world_pos.x;
-            transform.translation.y = world_pos.y;
+            transform.translation =
+                player_position(event.width, event.height, player.id.as_usize());
         }
     }
 }
@@ -266,8 +240,6 @@ fn setup_game(
     mut query: Query<(Entity, &mut Player)>,
     non_pov_play_id: Res<NonPovPlayId>,
 ) {
-    info!("Setting up game");
-
     // Distribute cards from Game hands.
     let mut players: HashMap<usize, _> = HashMap::new();
     for (entity, mut player) in query.iter_mut() {
@@ -417,6 +389,7 @@ fn distribute_to_other(
     commands.entity(entity).add_children(&cards_ids);
 }
 const CARD_SPEED: f32 = 1000.0;
+const COLLECTION_DELAY: f32 = 2.;
 
 /// This is called when the POV player clicks on one of their cards.
 fn select_play_card(
@@ -426,7 +399,6 @@ fn select_play_card(
         (Entity, &mut Transform, &Card),
         (With<Card>, With<Playable>, With<Selected>),
     >,
-
     handle_effect_id: Res<HandleEffectId>,
     mut unselected_card_query: Query<(&mut Transform, &Card), (With<Playable>, Without<Selected>)>,
     moving_query: Query<(), With<MovingTo>>,
@@ -434,13 +406,11 @@ fn select_play_card(
 ) {
     // Only allow playing if it's Player 0's turn
     if game.0.current_player() != PlayerId::PLAYER_0 {
-        info!("Not Player's turn");
         return;
     }
 
     // Prevent playing while animations are ongoing
     if !moving_query.is_empty() {
-        info!("Cannot play card while animations are in progress");
         return;
     }
 
@@ -461,8 +431,7 @@ fn select_play_card(
                 .count();
             let player_index = (game.0.trick_leader().as_usize() + num_played) % 4;
             match game.0.play_card(card.0) {
-                Ok(effect) => {
-                    info!("Played card: {:?}, effect: {:?}", card.0, effect);
+                Ok(_effect) => {
                     // Move to trick position
                     let (x, y) = TRICK_POSITIONS[player_index];
                     commands
@@ -500,18 +469,12 @@ fn move_to_target(
         let move_amount = moving.speed * time.delta_secs();
 
         if move_amount >= distance {
-            // Snap to target
             transform.translation = moving.target;
-
-            // Run the callback system if provided
+            commands.entity(entity).remove::<MovingTo>();
             if let Some(system_id) = moving.on_arrival {
                 commands.run_system(system_id);
             }
-
-            // Remove the component
-            commands.entity(entity).remove::<MovingTo>();
         } else {
-            // Continue moving
             transform.translation += direction.normalize() * move_amount;
         }
     }
@@ -527,7 +490,6 @@ impl FromWorld for HandleEffectId {
 }
 fn handle_effect(
     non_pov_play_id: Res<NonPovPlayId>,
-    setup_game_id: Res<SetupGameId>,
     collect_cards_id: Res<CollectCardsId>,
     font: Res<FontHandle>,
     mut commands: Commands,
@@ -537,35 +499,27 @@ fn handle_effect(
     let effect = game.0.history().last().unwrap().1;
     match effect {
         shuftlib::tressette::MoveEffect::CardPlayed => {
-            info!("Handling card played");
             if game.0.current_player() != PlayerId::PLAYER_0 {
                 commands.run_system(non_pov_play_id.0)
             }
         }
-        shuftlib::tressette::MoveEffect::TrickCompleted { winner } => {
-            info!("Handling card played");
-            commands.run_system(collect_cards_id.0);
-            if winner != PlayerId::PLAYER_0 {
-                commands.run_system(non_pov_play_id.0)
-            }
+        shuftlib::tressette::MoveEffect::TrickCompleted { .. } => {
+            commands.insert_resource(CollectionTimer::new(collect_cards_id.0));
         }
         shuftlib::tressette::MoveEffect::HandComplete {
             trick_winner: _,
             score,
         } => {
-            info!("Handling hand complete");
             if let Ok(mut text) = score_text_query.single_mut() {
                 *text = Text::new(format!("Score: {} - {}", score.0, score.1));
             }
-            commands.run_system(collect_cards_id.0);
-            commands.run_system(setup_game_id.0);
+            commands.insert_resource(CollectionTimer::new(collect_cards_id.0));
         }
         shuftlib::tressette::MoveEffect::GameOver {
             trick_winner: _,
             final_score,
         } => {
-            info!("Handling game over");
-            commands.run_system(collect_cards_id.0);
+            commands.insert_resource(CollectionTimer::new(collect_cards_id.0));
             if let Ok(mut text) = score_text_query.single_mut() {
                 *text = Text::new(format!(
                     "Final Score: {} - {}",
@@ -610,14 +564,119 @@ struct RestartButton;
 struct CollectCardsId(SystemId);
 impl FromWorld for CollectCardsId {
     fn from_world(world: &mut World) -> Self {
-        let id = world.register_system(mark_cards_for_despawn);
+        let id = world.register_system(collect_cards);
         CollectCardsId(id)
     }
 }
-fn mark_cards_for_despawn(mut query: Query<Entity, With<CardInPlay>>, mut commands: Commands) {
-    info!("Marking cards for despawn");
-    for card in query.iter_mut() {
-        commands.entity(card).insert(ToDespawn);
+
+fn collect_cards(
+    query: Query<Entity, With<CardInPlay>>,
+    game: Res<GameState>,
+    mark_for_despawn_and_continue_id: Res<MarkForDespawnAndContinueId>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    mut cards_being_collected: ResMut<CardsBeingCollected>,
+    mut commands: Commands,
+) {
+    let effect = game.0.history().last().unwrap().1;
+    let winner = match effect {
+        MoveEffect::TrickCompleted { winner } => Some(winner),
+        MoveEffect::HandComplete { trick_winner, .. } => Some(trick_winner),
+        MoveEffect::GameOver { trick_winner, .. } => Some(trick_winner),
+        _ => None,
+    };
+
+    if let Some(winner) = winner {
+        let window = window.iter().next().unwrap();
+        let mut count = 0;
+        for card in query.iter() {
+            commands.entity(card).insert(MovingTo {
+                target: player_position(window.width(), window.height(), winner.as_usize()),
+                speed: CARD_SPEED,
+                on_arrival: Some(mark_for_despawn_and_continue_id.0),
+            });
+            count += 1;
+        }
+        cards_being_collected.0 = count;
+    }
+}
+
+#[derive(Resource, Default)]
+struct CardsBeingCollected(usize);
+
+#[derive(Resource, Default)]
+struct CollectionTimer {
+    timer: Option<Timer>,
+    callback: Option<SystemId>,
+}
+
+impl CollectionTimer {
+    fn new(callback: SystemId) -> Self {
+        Self {
+            timer: Some(Timer::from_seconds(COLLECTION_DELAY, TimerMode::Once)),
+            callback: Some(callback),
+        }
+    }
+}
+
+fn check_collection_timer(
+    mut timer: ResMut<CollectionTimer>,
+    time: Res<Time>,
+    mut commands: Commands,
+) {
+    if let Some(ref mut t) = timer.timer {
+        t.tick(time.delta());
+        if t.just_finished() {
+            if let Some(callback) = timer.callback {
+                commands.run_system(callback);
+            }
+            timer.timer = None;
+            timer.callback = None;
+        }
+    }
+}
+
+#[derive(Resource)]
+struct MarkForDespawnAndContinueId(SystemId);
+impl FromWorld for MarkForDespawnAndContinueId {
+    fn from_world(world: &mut World) -> Self {
+        let id = world.register_system(mark_for_despawn_and_continue);
+        MarkForDespawnAndContinueId(id)
+    }
+}
+fn mark_for_despawn_and_continue(
+    card_query: Query<Entity, (With<CardInPlay>, Without<MovingTo>)>,
+    non_pov_play_id: Res<NonPovPlayId>,
+    setup_game_id: Res<SetupGameId>,
+    game: Res<GameState>,
+    mut cards_being_collected: ResMut<CardsBeingCollected>,
+    mut commands: Commands,
+) {
+    // Decrement counter for the card that just arrived
+    if cards_being_collected.0 > 0 {
+        cards_being_collected.0 -= 1;
+    }
+
+    // If all cards have finished collecting
+    if cards_being_collected.0 == 0 {
+        // Mark all CardInPlay entities for despawn
+        for entity in card_query.iter() {
+            commands.entity(entity).insert(ToDespawn);
+        }
+
+        // After marking cards for despawn, check what to do next based on the effect
+        if let Some((_move, effect)) = game.0.history().last() {
+            match effect {
+                MoveEffect::TrickCompleted { winner } => {
+                    if *winner != PlayerId::PLAYER_0 {
+                        commands.run_system(non_pov_play_id.0);
+                    }
+                }
+                MoveEffect::HandComplete { .. } => {
+                    commands.run_system(setup_game_id.0);
+                }
+                _ => {}
+            }
+        }
     }
 }
 
@@ -686,8 +745,7 @@ fn non_pov_play(
             .count();
         let player_index = (game.0.trick_leader().as_usize() + num_played) % 4;
         match game.0.play_card(*card) {
-            Ok(effect) => {
-                info!("AI played card: {:?}, effect: {:?}", card, effect);
+            Ok(_effect) => {
                 // Move to trick position and show face
                 if let Some((entity, mut sprite, _)) =
                     query.iter_mut().find(|(_, _, c)| c.0 == *card)
