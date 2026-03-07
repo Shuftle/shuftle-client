@@ -5,7 +5,6 @@ use bevy::{
     prelude::*,
     text::{Font, TextFont},
     ui::{Interaction, Node, PositionType, Val},
-    window::{PrimaryWindow, WindowResized},
 };
 use shuftlib::{
     core::{Suit, italian::ItalianRank},
@@ -13,6 +12,8 @@ use shuftlib::{
     trick_taking::{PLAYERS, PlayerId},
 };
 use strum::IntoEnumIterator;
+
+use crate::camera::CANVAS_SIZE;
 
 #[derive(Resource)]
 struct GameState(Game);
@@ -22,20 +23,17 @@ struct FontHandle(Handle<Font>);
 
 /// Positions for played cards in the trick (center of table, clockwise diamond)
 const TRICK_POSITIONS: [(f32, f32); 4] = [
-    (0.0, -50.0), // Player 0 (bottom)
-    (50.0, 0.0),  // Player 1 (right)
-    (0.0, 50.0),  // Player 2 (top)
-    (-50.0, 0.0), // Player 3 (left)
+    (0.0, -CARD_SIZE.y), // Player 0 (bottom)
+    (CARD_SIZE.x, 0.0),  // Player 1 (right)
+    (0.0, CARD_SIZE.x),  // Player 2 (top)
+    (-CARD_SIZE.x, 0.0), // Player 3 (left)
 ];
 
 /// Distance between the visual representation of the player and the edge of the screen
-const EDGE_MARGIN: u32 = 60;
+const EDGE_MARGIN: f32 = 10.;
 
-/// Width of the card sprite
-const CARD_WIDTH: u32 = 96;
-
-/// Height of the card sprite
-const CARD_HEIGHT: u32 = 50;
+/// Size of the card sprite.
+const CARD_SIZE: Vec2 = Vec2::new(24., 36.);
 
 /// Number of cards per player
 const CARDS_PER_PLAYER: usize = 10;
@@ -58,7 +56,7 @@ impl Plugin for GameLogic {
             .add_systems(
                 Update,
                 (
-                    update_player_positions.run_if(on_message::<WindowResized>),
+                    // update_player_positions.run_if(on_message::<WindowResized>),
                     move_to_target.run_if(any_with_component::<MovingTo>),
                     handle_restart_button,
                 ),
@@ -81,10 +79,7 @@ fn init_scene(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     setup_game_sys: Res<SetupGameId>,
-    window: Query<&Window, With<PrimaryWindow>>,
 ) {
-    let window = window.iter().next().unwrap();
-
     // Load default font
     let font_handle: Handle<Font> = Default::default();
     commands.insert_resource(FontHandle(font_handle.clone()));
@@ -110,7 +105,7 @@ fn init_scene(
     commands.spawn((
         Name::new("Player 0"),
         Transform {
-            translation: player_position(window.width(), window.height(), 0),
+            translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, 0),
             ..default()
         },
         Player {
@@ -124,7 +119,7 @@ fn init_scene(
     commands.spawn((
         Name::new("Player 1"),
         Transform {
-            translation: player_position(window.width(), window.height(), 1),
+            translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, 1),
             ..default()
         },
         Player {
@@ -138,7 +133,7 @@ fn init_scene(
     commands.spawn((
         Name::new("Player 2"),
         Transform {
-            translation: player_position(window.width(), window.height(), 2),
+            translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, 2),
             ..default()
         },
         Player {
@@ -152,7 +147,7 @@ fn init_scene(
     commands.spawn((
         Name::new("Player 3"),
         Transform {
-            translation: player_position(window.width(), window.height(), 3),
+            translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, 3),
             ..default()
         },
         Player {
@@ -188,40 +183,25 @@ fn player_position(width: f32, height: f32, player_id: usize) -> Vec3 {
     match player_id {
         0 => Vec3 {
             x: 0.0,
-            y: -height * 0.5 + EDGE_MARGIN as f32 + CARD_HEIGHT as f32 * 0.5,
+            y: -height * 0.5 + EDGE_MARGIN as f32 + CARD_SIZE.y * 0.5,
             z: 0.0,
         },
         1 => Vec3 {
-            x: width * 0.5 - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 * 0.5,
+            x: width * 0.5 - EDGE_MARGIN as f32 - CARD_SIZE.y * 0.5,
             y: 0.0,
             z: 0.0,
         },
         2 => Vec3 {
             x: 0.0,
-            y: height * 0.5 - EDGE_MARGIN as f32 - CARD_HEIGHT as f32 * 0.5,
+            y: height * 0.5 - EDGE_MARGIN as f32 - CARD_SIZE.y * 0.5,
             z: 0.0,
         },
         3 => Vec3 {
-            x: -width * 0.5 + EDGE_MARGIN as f32 + CARD_HEIGHT as f32 * 0.5,
+            x: -width * 0.5 + EDGE_MARGIN as f32 + CARD_SIZE.y * 0.5,
             y: 0.0,
             z: 0.0,
         },
         _ => panic!("Invalid player id"),
-    }
-}
-
-/// System called every frame to position players at screen edges.
-fn update_player_positions(
-    mut players: Query<(&mut Transform, &Player)>,
-    mut resize_reader: MessageReader<WindowResized>,
-) {
-    info!("Calling update player positions");
-    for event in resize_reader.read() {
-        info!("Actually updating");
-        for (mut transform, player) in players.iter_mut() {
-            transform.translation =
-                player_position(event.width, event.height, player.id.as_usize());
-        }
     }
 }
 
@@ -288,7 +268,7 @@ fn distribute_to_pov(
     cards: Vec<TressetteCard>,
     card_counter: &mut usize,
 ) {
-    let spacing = CARD_WIDTH as f32 * 0.5;
+    let spacing = CARD_SIZE.x * 0.5;
     let num_cards = CARDS_PER_PLAYER;
     let total_width = (num_cards - 1) as f32 * spacing;
     let center_offset = total_width / 2.0;
@@ -302,6 +282,7 @@ fn distribute_to_pov(
                 .spawn(Cardbundle {
                     card: Card(*card),
                     sprite: Sprite {
+                        custom_size: Some(CARD_SIZE),
                         image: image_handle,
                         ..default()
                     },
@@ -334,7 +315,7 @@ fn distribute_to_other(
     card_counter: &mut usize,
     player_id: usize,
 ) {
-    let spacing = CARD_WIDTH as f32 * 0.5;
+    let spacing = CARD_SIZE.x * 0.5;
     let num_cards = CARDS_PER_PLAYER;
     let total_width = (num_cards - 1) as f32 * spacing;
     let center_offset = total_width / 2.0;
@@ -379,6 +360,7 @@ fn distribute_to_other(
                         ..default()
                     },
                     Sprite {
+                        custom_size: Some(CARD_SIZE),
                         image: card_back.0.clone(),
                         ..default()
                     },
@@ -392,6 +374,7 @@ fn distribute_to_other(
 }
 const CARD_SPEED: f32 = 1000.0;
 const COLLECTION_DELAY: f32 = 2.;
+const SELECTION_OFFSET: f32 = 20.;
 
 /// This is called when the POV player clicks on one of their cards.
 fn select_play_card(
@@ -421,7 +404,7 @@ fn select_play_card(
 
     for (selected_entity, mut selected_transform, card) in selected_card_query.iter_mut() {
         if selected_entity != clicked_card {
-            selected_transform.translation.y -= 50.;
+            selected_transform.translation.y -= SELECTION_OFFSET;
             commands.entity(selected_entity).remove::<Selected>();
         } else {
             // Play the card
@@ -455,7 +438,7 @@ fn select_play_card(
         }
     }
     if let Ok((mut transform, _card)) = unselected_card_query.get_mut(clicked_card) {
-        transform.translation.y += 50.;
+        transform.translation.y += SELECTION_OFFSET;
         commands.entity(clicked_card).insert(Selected);
     }
 }
@@ -575,7 +558,6 @@ fn collect_cards(
     query: Query<Entity, With<CardInPlay>>,
     game: Res<GameState>,
     mark_for_despawn_and_continue_id: Res<MarkForDespawnAndContinueId>,
-    window: Query<&Window, With<PrimaryWindow>>,
     mut cards_being_collected: ResMut<CardsBeingCollected>,
     mut commands: Commands,
 ) {
@@ -588,11 +570,10 @@ fn collect_cards(
     };
 
     if let Some(winner) = winner {
-        let window = window.iter().next().unwrap();
         let mut count = 0;
         for card in query.iter() {
             commands.entity(card).insert(MovingTo {
-                target: player_position(window.width(), window.height(), winner.as_usize()),
+                target: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, winner.as_usize()),
                 speed: CARD_SPEED,
                 on_arrival: Some(mark_for_despawn_and_continue_id.0),
             });
