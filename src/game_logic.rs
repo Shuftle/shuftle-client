@@ -183,21 +183,21 @@ fn player_position(width: f32, height: f32, player_id: usize) -> Vec3 {
     match player_id {
         0 => Vec3 {
             x: 0.0,
-            y: -height * 0.5 + EDGE_MARGIN as f32 + CARD_SIZE.y * 0.5,
+            y: -height * 0.5 + EDGE_MARGIN + CARD_SIZE.y * 0.5,
             z: 0.0,
         },
         1 => Vec3 {
-            x: width * 0.5 - EDGE_MARGIN as f32 - CARD_SIZE.y * 0.5,
+            x: width * 0.5 - EDGE_MARGIN - CARD_SIZE.y * 0.5,
             y: 0.0,
             z: 0.0,
         },
         2 => Vec3 {
             x: 0.0,
-            y: height * 0.5 - EDGE_MARGIN as f32 - CARD_SIZE.y * 0.5,
+            y: height * 0.5 - EDGE_MARGIN - CARD_SIZE.y * 0.5,
             z: 0.0,
         },
         3 => Vec3 {
-            x: -width * 0.5 + EDGE_MARGIN as f32 + CARD_SIZE.y * 0.5,
+            x: -width * 0.5 + EDGE_MARGIN + CARD_SIZE.y * 0.5,
             y: 0.0,
             z: 0.0,
         },
