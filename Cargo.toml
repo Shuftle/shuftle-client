@@ -18,7 +18,7 @@ name = "shuftle"
 path = "src/main.rs"
 
 [dependencies]
-bevy = { version = "0.18", features = ["dynamic_linking", "bevy_picking"] }
+bevy = { version = "0.18", default-features = false, features = ["2d", "png", "dynamic_linking"] }
 shuftlib = "0.3"
 strum = { version = "0.28", features = ["derive"] }
 
