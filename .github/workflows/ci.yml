@@ -73,3 +73,13 @@ jobs:
         uses: actions/checkout@v6
       - name: Machete
         uses: bnjbvr/cargo-machete@main
+
+  unused-features:
+    name: Unused features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-unused-features
+      - run: cargo unused-features
