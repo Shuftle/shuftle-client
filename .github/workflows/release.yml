@@ -26,6 +26,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: ${{ env.use_git_lfs }}
+      - uses: Swatinem/rust-cache@v2
       - name: Download assets
         run: |
           mkdir -p assets

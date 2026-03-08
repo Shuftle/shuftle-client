@@ -17,21 +17,26 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Test with stable
+  build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.toml') }}
+      - uses: Swatinem/rust-cache@v2
+      - name: install dependencies
+        run: |
+          sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check compilation
+        run: cargo check
+
+  test:
+    name: Test with stable
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
       - name: install dependencies
         run: |
           sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
@@ -53,18 +58,10 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    needs: build
     steps:
       - uses: actions/checkout@v6
-      - name: Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.toml') }}
+      - uses: Swatinem/rust-cache@v2
       - name: install dependencies
         run: |
           sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
