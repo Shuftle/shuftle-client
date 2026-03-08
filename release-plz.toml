@@ -1,5 +1,4 @@
 [workspace]
 git_only = true
-publish_no_verify = true
 semver_check = false
 release_always = false
