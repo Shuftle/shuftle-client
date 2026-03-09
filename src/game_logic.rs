@@ -33,7 +33,7 @@ const TRICK_POSITIONS: [(f32, f32); 4] = [
 const EDGE_MARGIN: f32 = 10.;
 
 /// Size of the card sprite.
-const CARD_SIZE: Vec2 = Vec2::new(24., 36.);
+const CARD_SIZE: Vec2 = Vec2::new(32., 48.);
 
 /// Number of cards per player
 const CARDS_PER_PLAYER: usize = 10;
@@ -52,7 +52,6 @@ pub struct GameLogic;
 impl Plugin for GameLogic {
     fn build(&self, app: &mut App) {
         app.add_systems(PostStartup, init_scene)
-            .add_systems(PostStartup, remove_name_from_text.after(init_scene))
             .add_systems(
                 Update,
                 (
@@ -797,12 +796,3 @@ pub struct ItalianAssets(pub Vec<Vec<Handle<Image>>>);
 
 #[derive(Resource)]
 pub struct CardBack(pub Handle<Image>);
-
-fn remove_name_from_text(
-    mut commands: Commands,
-    query: Query<Entity, Or<(With<Text>, With<Sprite>)>>,
-) {
-    for entity in query.iter() {
-        commands.entity(entity).remove::<Name>();
-    }
-}
