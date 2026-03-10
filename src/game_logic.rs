@@ -24,9 +24,9 @@ struct FontHandle(Handle<Font>);
 /// Positions for played cards in the trick (center of table, clockwise diamond)
 const TRICK_POSITIONS: [(f32, f32); 4] = [
     (0.0, -CARD_SIZE.y), // Player 0 (bottom)
-    (CARD_SIZE.x, 0.0),  // Player 1 (right)
-    (0.0, CARD_SIZE.x),  // Player 2 (top)
-    (-CARD_SIZE.x, 0.0), // Player 3 (left)
+    (CARD_SIZE.y, 0.0),  // Player 1 (right)
+    (0.0, CARD_SIZE.y),  // Player 2 (top)
+    (-CARD_SIZE.y, 0.0), // Player 3 (left)
 ];
 
 /// Distance between the visual representation of the player and the edge of the screen
@@ -38,15 +38,6 @@ const CARD_SIZE: Vec2 = Vec2::new(32., 48.);
 /// Number of cards per player
 const CARDS_PER_PLAYER: usize = 10;
 
-#[derive(States, Debug, Clone, Copy, Default, Eq, PartialEq, Hash)]
-pub enum PlayerTurn {
-    #[default]
-    Player0,
-    Player1,
-    Player2,
-    Player3,
-}
-
 pub struct GameLogic;
 
 impl Plugin for GameLogic {
@@ -55,7 +46,6 @@ impl Plugin for GameLogic {
             .add_systems(
                 Update,
                 (
-                    // update_player_positions.run_if(on_message::<WindowResized>),
                     move_to_target.run_if(any_with_component::<MovingTo>),
                     handle_restart_button,
                 ),
@@ -63,12 +53,14 @@ impl Plugin for GameLogic {
             .add_systems(Last, despawn_marked.run_if(any_with_component::<ToDespawn>))
             .init_resource::<SetupGameId>()
             .init_resource::<NonPovPlayId>()
+            .init_resource::<EnablePovId>()
             .init_resource::<HandleEffectId>()
             .init_resource::<CollectCardsId>()
             .init_resource::<MarkForDespawnAndContinueId>()
             .init_resource::<CardsBeingCollected>()
             .init_resource::<CollectionTimer>()
             .insert_resource(GameState(Game::new()))
+            .init_state::<Turn>()
             .add_systems(Update, check_collection_timer);
     }
 }
@@ -220,6 +212,7 @@ fn setup_game(
     card_back: Res<CardBack>,
     mut query: Query<(Entity, &mut Player)>,
     non_pov_play_id: Res<NonPovPlayId>,
+    enable_pov_id: Res<EnablePovId>,
 ) {
     // Distribute cards from Game hands.
     let mut players: HashMap<usize, _> = HashMap::new();
@@ -230,11 +223,9 @@ fn setup_game(
 
     for i in 0..PLAYERS {
         let mut cards: Vec<TressetteCard> = game.0.hand(PlayerId::try_from(i).unwrap()).to_vec();
-        if i == 0 {
-            cards.sort_by(|a, b| (a.suit() as u8).cmp(&(b.suit() as u8)).then(a.cmp(b)));
-        }
         let (entity, player) = players.get_mut(&i).unwrap();
         if i == 0 {
+            cards.sort_by(|a, b| (a.suit() as u8).cmp(&(b.suit() as u8)).then(a.cmp(b)));
             distribute_to_pov(
                 &mut commands,
                 &italian_assets,
@@ -254,9 +245,7 @@ fn setup_game(
         }
     }
 
-    if game.0.current_player() != PlayerId::PLAYER_0 {
-        commands.run_system(non_pov_play_id.0);
-    }
+    players_play(game, &mut commands, non_pov_play_id, enable_pov_id);
 }
 
 /// Spawns card entities for the POV player.
@@ -293,8 +282,8 @@ fn distribute_to_pov(
                         },
                         ..default()
                     },
-                    playable: Playable,
                     pickable: Pickable::default(),
+                    pov: PovCard,
                 })
                 .observe(select_play_card)
                 .id();
@@ -385,16 +374,10 @@ fn select_play_card(
     >,
     handle_effect_id: Res<HandleEffectId>,
     mut unselected_card_query: Query<(&mut Transform, &Card), (With<Playable>, Without<Selected>)>,
-    moving_query: Query<(), With<MovingTo>>,
     mut commands: Commands,
+    state: Res<State<Turn>>,
 ) {
-    // Only allow playing if it's Player 0's turn
-    if game.0.current_player() != PlayerId::PLAYER_0 {
-        return;
-    }
-
-    // Prevent playing while animations are ongoing
-    if !moving_query.is_empty() {
+    if !matches!(state.into_inner().get(), Turn::PovTurn) {
         return;
     }
 
@@ -406,22 +389,15 @@ fn select_play_card(
             selected_transform.translation.y -= SELECTION_OFFSET;
             commands.entity(selected_entity).remove::<Selected>();
         } else {
-            // Play the card
-            let num_played = game
-                .0
-                .current_trick()
-                .iter()
-                .filter(|c| c.is_some())
-                .count();
-            let player_index = (game.0.trick_leader().as_usize() + num_played) % 4;
             match game.0.play_card(card.0) {
                 Ok(_effect) => {
                     // Move to trick position
-                    let (x, y) = TRICK_POSITIONS[player_index];
+                    let (x, y) = TRICK_POSITIONS[PlayerId::PLAYER_0.as_usize()];
                     commands
                         .entity(clicked_card)
                         .remove::<Playable>()
                         .remove::<Selected>()
+                        .remove::<PovCard>()
                         .insert(CardInPlay)
                         .remove_parent_in_place()
                         .insert(MovingTo {
@@ -429,6 +405,7 @@ fn select_play_card(
                             speed: CARD_SPEED,
                             on_arrival: Some(handle_effect_id.0),
                         });
+                    commands.set_state(Turn::NonPovTurn);
                 }
                 Err(e) => {
                     warn!("Invalid play: {:?}", e);
@@ -474,6 +451,7 @@ impl FromWorld for HandleEffectId {
 }
 fn handle_effect(
     non_pov_play_id: Res<NonPovPlayId>,
+    enable_pov_id: Res<EnablePovId>,
     collect_cards_id: Res<CollectCardsId>,
     font: Res<FontHandle>,
     mut commands: Commands,
@@ -483,9 +461,7 @@ fn handle_effect(
     let effect = game.0.history().last().unwrap().1;
     match effect {
         shuftlib::tressette::MoveEffect::CardPlayed => {
-            if game.0.current_player() != PlayerId::PLAYER_0 {
-                commands.run_system(non_pov_play_id.0)
-            }
+            players_play(game, &mut commands, non_pov_play_id, enable_pov_id);
         }
         shuftlib::tressette::MoveEffect::TrickCompleted { .. } => {
             commands.insert_resource(CollectionTimer::new(collect_cards_id.0));
@@ -628,6 +604,7 @@ impl FromWorld for MarkForDespawnAndContinueId {
 fn mark_for_despawn_and_continue(
     card_query: Query<Entity, (With<CardInPlay>, Without<MovingTo>)>,
     non_pov_play_id: Res<NonPovPlayId>,
+    enable_pov_id: Res<EnablePovId>,
     setup_game_id: Res<SetupGameId>,
     game: Res<GameState>,
     mut cards_being_collected: ResMut<CardsBeingCollected>,
@@ -648,10 +625,8 @@ fn mark_for_despawn_and_continue(
         // After marking cards for despawn, check what to do next based on the effect
         if let Some((_move, effect)) = game.0.history().last() {
             match effect {
-                MoveEffect::TrickCompleted { winner } => {
-                    if *winner != PlayerId::PLAYER_0 {
-                        commands.run_system(non_pov_play_id.0);
-                    }
+                MoveEffect::TrickCompleted { winner: _ } => {
+                    players_play(game, &mut commands, non_pov_play_id, enable_pov_id);
                 }
                 MoveEffect::HandComplete { .. } => {
                     commands.run_system(setup_game_id.0);
@@ -696,6 +671,53 @@ fn handle_restart_button(
     }
 }
 
+/// One shot system that determines whether it's the POV player's turn or not
+/// and calls the correct system to handle the play operations.
+fn players_play(
+    game: Res<GameState>,
+    commands: &mut Commands,
+    non_pov_play_id: Res<NonPovPlayId>,
+    enable_pov_id: Res<EnablePovId>,
+) {
+    if game.0.current_player() != PlayerId::PLAYER_0 {
+        commands.run_system(non_pov_play_id.0)
+    } else {
+        commands.run_system(enable_pov_id.0);
+    }
+}
+
+#[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
+enum Turn {
+    #[default]
+    PovTurn,
+    NonPovTurn,
+}
+
+#[derive(Resource)]
+struct EnablePovId(SystemId);
+impl FromWorld for EnablePovId {
+    fn from_world(world: &mut World) -> Self {
+        let id = world.register_system(enable_pov);
+        EnablePovId(id)
+    }
+}
+
+fn enable_pov(
+    game: Res<GameState>,
+    mut commands: Commands,
+    query: Query<(Entity, &Card), With<PovCard>>,
+) {
+    let playable = game.0.legal_cards();
+    for (entity, card) in query.iter() {
+        if playable.contains(&card.0) {
+            commands.entity(entity).insert(Playable);
+        } else {
+            commands.entity(entity).remove::<Playable>();
+        }
+    }
+    commands.set_state(Turn::PovTurn);
+}
+
 #[derive(Resource)]
 struct NonPovPlayId(SystemId);
 impl FromWorld for NonPovPlayId {
@@ -704,6 +726,7 @@ impl FromWorld for NonPovPlayId {
         NonPovPlayId(id)
     }
 }
+
 /// One shot system called for non POV players.
 fn non_pov_play(
     mut game: ResMut<GameState>,
@@ -712,11 +735,6 @@ fn non_pov_play(
     italian_assets: Res<ItalianAssets>,
     mut query: Query<(Entity, &mut Sprite, &Card)>,
 ) {
-    if game.0.current_player() == PlayerId::PLAYER_0 {
-        error!("It's the POV player's turn. This shouldn't have happened");
-        return;
-    }
-
     let legal_cards = game.0.legal_cards();
     if let Some(card) = legal_cards.first() {
         let num_played = game
@@ -761,6 +779,9 @@ pub struct Card(pub TressetteCard);
 struct Playable;
 
 #[derive(Component, Default)]
+struct PovCard;
+
+#[derive(Component, Default)]
 struct Selected;
 
 #[derive(Component, Default)]
@@ -781,8 +802,8 @@ struct Cardbundle {
     pub transform: Transform,
     pub card: Card,
     pub sprite: Sprite,
-    pub playable: Playable,
     pub pickable: Pickable,
+    pub pov: PovCard,
 }
 
 #[derive(Component)]
