@@ -705,14 +705,16 @@ impl FromWorld for EnablePovId {
 fn enable_pov(
     game: Res<GameState>,
     mut commands: Commands,
-    query: Query<(Entity, &Card), With<PovCard>>,
+    mut query: Query<(Entity, &Card, &mut Sprite), With<PovCard>>,
 ) {
     let playable = game.0.legal_cards();
-    for (entity, card) in query.iter() {
+    for (entity, card, mut sprite) in query.iter_mut() {
         if playable.contains(&card.0) {
             commands.entity(entity).insert(Playable);
+            sprite.color = Color::linear_rgb(1., 1., 1.);
         } else {
             commands.entity(entity).remove::<Playable>();
+            sprite.color = Color::linear_rgb(0.3, 0.3, 0.3);
         }
     }
     commands.set_state(Turn::PovTurn);
