@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: olegtarasov/get-tag@v2.1.4
         id: get_version
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           lfs: ${{ env.use_git_lfs }}
       - uses: Swatinem/rust-cache@v2
