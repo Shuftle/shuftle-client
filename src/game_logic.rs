@@ -3,8 +3,7 @@ use std::{collections::HashMap, f32::consts::PI};
 use bevy::{
     ecs::{schedule::common_conditions::any_with_component, system::SystemId},
     prelude::*,
-    text::{Font, TextFont},
-    ui::{Interaction, Node, PositionType, Val},
+    ui_widgets::{Activate, Button},
 };
 use shuftlib::{
     core::{Suit, italian::ItalianRank},
@@ -17,9 +16,6 @@ use crate::camera::CANVAS_SIZE;
 
 #[derive(Resource)]
 struct GameState(Game);
-
-#[derive(Resource, Default)]
-struct FontHandle(Handle<Font>);
 
 /// Positions for played cards in the trick (center of table, clockwise diamond)
 const TRICK_POSITIONS: [(f32, f32); 4] = [
@@ -45,10 +41,7 @@ impl Plugin for GameLogic {
         app.add_systems(PostStartup, init_scene)
             .add_systems(
                 Update,
-                (
-                    move_to_target.run_if(any_with_component::<MovingTo>),
-                    handle_restart_button,
-                ),
+                move_to_target.run_if(any_with_component::<MovingTo>),
             )
             .add_systems(Last, despawn_marked.run_if(any_with_component::<ToDespawn>))
             .init_resource::<SetupGameId>()
@@ -58,10 +51,8 @@ impl Plugin for GameLogic {
             .init_resource::<CollectCardsId>()
             .init_resource::<MarkForDespawnAndContinueId>()
             .init_resource::<CardsBeingCollected>()
-            .init_resource::<CollectionTimer>()
             .insert_resource(GameState(Game::new()))
-            .init_state::<Turn>()
-            .add_systems(Update, check_collection_timer);
+            .init_state::<Turn>();
     }
 }
 
@@ -71,10 +62,6 @@ fn init_scene(
     asset_server: Res<AssetServer>,
     setup_game_sys: Res<SetupGameId>,
 ) {
-    // Load default font
-    let font_handle: Handle<Font> = Default::default();
-    commands.insert_resource(FontHandle(font_handle.clone()));
-
     // Load Italian assets
     let mut italian_assets = ItalianAssets(Vec::with_capacity(4));
     for suit in Suit::iter() {
@@ -152,16 +139,12 @@ fn init_scene(
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(10.0),
-            left: Val::Px(10.0),
+            top: px(10),
+            left: px(10),
             ..default()
         },
         Text::new("Score: 0 - 0"),
-        TextFont {
-            font: font_handle.clone(),
-            font_size: 24.0,
-            ..default()
-        },
+        TextFont::from_font_size(24.0),
         TextColor(Color::WHITE),
         ScoreText,
     ));
@@ -267,24 +250,20 @@ fn distribute_to_pov(
             let image_handle =
                 italian_assets.0[card.suit() as usize][card.rank() as usize - 1].clone();
             let id = commands
-                .spawn(Cardbundle {
-                    card: Card(*card),
-                    sprite: Sprite {
+                .spawn((
+                    Card(*card),
+                    Sprite {
                         custom_size: Some(CARD_SIZE),
                         image: image_handle,
                         ..default()
                     },
-                    transform: Transform {
-                        translation: Vec3 {
-                            x: spacing * *card_counter as f32 - center_offset,
-                            z: *card_counter as f32,
-                            ..default()
-                        },
-                        ..default()
-                    },
-                    pickable: Pickable::default(),
-                    pov: PovCard,
-                })
+                    Transform::from_xyz(
+                        spacing * *card_counter as f32 - center_offset,
+                        0.,
+                        *card_counter as f32,
+                    ),
+                    PovCard,
+                ))
                 .observe(select_play_card)
                 .id();
             *card_counter += 1;
@@ -366,7 +345,7 @@ const SELECTION_OFFSET: f32 = 20.;
 
 /// This is called when the POV player clicks on one of their cards.
 fn select_play_card(
-    click: On<Pointer<Click>>,
+    click: On<PointerClick>,
     mut game: ResMut<GameState>,
     mut selected_card_query: Query<
         (Entity, &mut Transform, &Card),
@@ -381,8 +360,7 @@ fn select_play_card(
         return;
     }
 
-    let click_event = click.event();
-    let clicked_card = click_event.entity;
+    let clicked_card = click.entity;
 
     for (selected_entity, mut selected_transform, card) in selected_card_query.iter_mut() {
         if selected_entity != clicked_card {
@@ -453,7 +431,6 @@ fn handle_effect(
     non_pov_play_id: Res<NonPovPlayId>,
     enable_pov_id: Res<EnablePovId>,
     collect_cards_id: Res<CollectCardsId>,
-    font: Res<FontHandle>,
     mut commands: Commands,
     game: Res<GameState>,
     mut score_text_query: Query<&mut Text, With<ScoreText>>,
@@ -464,7 +441,10 @@ fn handle_effect(
             players_play(game, &mut commands, non_pov_play_id, enable_pov_id);
         }
         shuftlib::tressette::MoveEffect::TrickCompleted { .. } => {
-            commands.insert_resource(CollectionTimer::new(collect_cards_id.0));
+            commands
+                .delayed()
+                .secs(COLLECTION_DELAY)
+                .run_system(collect_cards_id.0);
         }
         shuftlib::tressette::MoveEffect::HandComplete {
             trick_winner: _,
@@ -473,52 +453,48 @@ fn handle_effect(
             if let Ok(mut text) = score_text_query.single_mut() {
                 *text = Text::new(format!("Score: {} - {}", score.0, score.1));
             }
-            commands.insert_resource(CollectionTimer::new(collect_cards_id.0));
+            commands
+                .delayed()
+                .secs(COLLECTION_DELAY)
+                .run_system(collect_cards_id.0);
         }
         shuftlib::tressette::MoveEffect::GameOver {
             trick_winner: _,
             final_score,
         } => {
-            commands.insert_resource(CollectionTimer::new(collect_cards_id.0));
+            commands
+                .delayed()
+                .secs(COLLECTION_DELAY)
+                .run_system(collect_cards_id.0);
             if let Ok(mut text) = score_text_query.single_mut() {
                 *text = Text::new(format!(
                     "Final Score: {} - {}",
                     final_score.0, final_score.1
                 ));
             }
-            // Spawn restart button
             commands
                 .spawn((
+                    Button,
                     Node {
                         position_type: PositionType::Absolute,
-                        top: Val::Px(50.0),
-                        left: Val::Px(10.0),
+                        top: px(50),
+                        left: px(10),
                         ..default()
                     },
-                    Interaction::None,
                     BackgroundColor(Color::srgb(0.5, 0.5, 0.5)),
-                    RestartButton,
-                ))
-                .with_children(|parent| {
-                    parent.spawn((
+                    children![(
                         Text::new("Restart Game"),
-                        TextFont {
-                            font: font.0.clone(),
-                            font_size: 24.0,
-                            ..default()
-                        },
+                        TextFont::from_font_size(24.0),
                         TextColor(Color::WHITE),
-                    ));
-                });
+                    )],
+                ))
+                .observe(restart_game);
         }
     }
 }
 
 #[derive(Component)]
 struct ToDespawn;
-
-#[derive(Component)]
-struct RestartButton;
 
 #[derive(Resource)]
 struct CollectCardsId(SystemId);
@@ -560,38 +536,6 @@ fn collect_cards(
 
 #[derive(Resource, Default)]
 struct CardsBeingCollected(usize);
-
-#[derive(Resource, Default)]
-struct CollectionTimer {
-    timer: Option<Timer>,
-    callback: Option<SystemId>,
-}
-
-impl CollectionTimer {
-    fn new(callback: SystemId) -> Self {
-        Self {
-            timer: Some(Timer::from_seconds(COLLECTION_DELAY, TimerMode::Once)),
-            callback: Some(callback),
-        }
-    }
-}
-
-fn check_collection_timer(
-    mut timer: ResMut<CollectionTimer>,
-    time: Res<Time>,
-    mut commands: Commands,
-) {
-    if let Some(ref mut t) = timer.timer {
-        t.tick(time.delta());
-        if t.just_finished() {
-            if let Some(callback) = timer.callback {
-                commands.run_system(callback);
-            }
-            timer.timer = None;
-            timer.callback = None;
-        }
-    }
-}
 
 #[derive(Resource)]
 struct MarkForDespawnAndContinueId(SystemId);
@@ -643,32 +587,29 @@ fn despawn_marked(mut commands: Commands, query: Query<Entity, With<ToDespawn>>)
     }
 }
 
-fn handle_restart_button(
-    interaction_query: Query<(Entity, &Interaction), (Changed<Interaction>, With<RestartButton>)>,
+/// Called when the restart button, shown once the game is over, is activated.
+fn restart_game(
+    activate: On<Activate>,
     setup_game_id: Res<SetupGameId>,
     mut game: ResMut<GameState>,
     mut score_text_query: Query<&mut Text, With<ScoreText>>,
     card_query: Query<Entity, With<Card>>,
     mut commands: Commands,
 ) {
-    for (entity, interaction) in interaction_query.iter() {
-        if *interaction == Interaction::Pressed {
-            // Mark all cards for despawn
-            for card_entity in card_query.iter() {
-                commands.entity(card_entity).insert(ToDespawn);
-            }
-            // Reset game state
-            *game = GameState(Game::new());
-            // Update score text
-            if let Ok(mut text) = score_text_query.single_mut() {
-                *text = Text::new("Score: 0 - 0");
-            }
-            // Despawn the button
-            commands.entity(entity).despawn();
-            // Restart game
-            commands.run_system(setup_game_id.0);
-        }
+    // Mark all cards for despawn
+    for card_entity in card_query.iter() {
+        commands.entity(card_entity).insert(ToDespawn);
     }
+    // Reset game state
+    *game = GameState(Game::new());
+    // Update score text
+    if let Ok(mut text) = score_text_query.single_mut() {
+        *text = Text::new("Score: 0 - 0");
+    }
+    // Despawn the button
+    commands.entity(activate.entity).despawn();
+    // Restart game
+    commands.run_system(setup_game_id.0);
 }
 
 /// One shot system that determines whether it's the POV player's turn or not
@@ -780,7 +721,9 @@ pub struct Card(pub TressetteCard);
 #[derive(Component, Default)]
 struct Playable;
 
+/// A card in the POV player's hand, which they can click to select and play.
 #[derive(Component, Default)]
+#[require(Pickable)]
 struct PovCard;
 
 #[derive(Component, Default)]
@@ -797,15 +740,6 @@ struct MovingTo {
     target: Vec3,
     speed: f32,
     on_arrival: Option<SystemId>,
-}
-
-#[derive(Bundle, Default)]
-struct Cardbundle {
-    pub transform: Transform,
-    pub card: Card,
-    pub sprite: Sprite,
-    pub pickable: Pickable,
-    pub pov: PovCard,
 }
 
 #[derive(Component)]
