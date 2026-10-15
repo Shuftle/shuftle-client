@@ -1,4 +1,4 @@
-use std::{collections::HashMap, f32::consts::PI};
+use std::f32::consts::PI;
 
 use bevy::{
     ecs::{schedule::common_conditions::any_with_component, system::SystemId},
@@ -6,18 +6,89 @@ use bevy::{
     ui_widgets::{Activate, Button},
 };
 use shuftlib::{
-    core::{Suit, italian::ItalianRank},
-    tressette::{Game, MoveEffect, TressetteCard},
-    trick_taking::{PLAYERS, PlayerId},
+    cards::italian::{ItalianRank, Suit},
+    engine::{Session, Status, UpdateOf},
+    tressette::{Action, Event, PerTeam, Seat, Team, Tressette, TressetteCard},
 };
-use strum::IntoEnumIterator;
 
 use crate::camera::CANVAS_SIZE;
 
-#[derive(Resource)]
-struct GameState(Game);
+/// The seat of the player in front of the screen.
+const POV: Seat = Seat::South;
 
-/// Positions for played cards in the trick (center of table, clockwise diamond)
+/// The game, and what the POV player saw of its last step.
+#[derive(Resource)]
+struct GameState {
+    session: Session<Tressette>,
+    /// The events of the last step that the POV player may receive.
+    last_events: Vec<Event>,
+}
+
+impl GameState {
+    fn new() -> Self {
+        Self {
+            session: Session::new(()),
+            last_events: Vec::new(),
+        }
+    }
+
+    /// Keeps the events of `update` that the POV player may receive.
+    fn record(&mut self, update: UpdateOf<Tressette>) {
+        self.last_events = update.for_seat(POV).cloned().collect();
+    }
+
+    /// Returns the seat the game waits on, if any.
+    fn to_act(&self) -> Option<Seat> {
+        self.session.status().to_act().first().copied()
+    }
+
+    /// Returns whether the game is over.
+    fn is_over(&self) -> bool {
+        matches!(self.session.status(), Status::Over(_))
+    }
+
+    /// Returns the seat that took the trick completed by the last step, if
+    /// any.
+    fn trick_taker(&self) -> Option<Seat> {
+        self.last_events.iter().find_map(|event| match event {
+            Event::TrickTaken { trick } => Some(trick.taker()),
+            _ => None,
+        })
+    }
+
+    /// Returns the score of the game, if the last step ended a hand.
+    fn hand_score(&self) -> Option<PerTeam<u8>> {
+        self.last_events.iter().find_map(|event| match event {
+            Event::HandScored { score, .. } => Some(*score),
+            _ => None,
+        })
+    }
+}
+
+/// Returns where `seat` is drawn: 0 is the bottom of the screen (the POV
+/// player), then 1 right, 2 top and 3 left, in play order.
+fn screen_slot(seat: Seat) -> usize {
+    match seat {
+        Seat::South => 0,
+        Seat::East => 1,
+        Seat::North => 2,
+        Seat::West => 3,
+    }
+}
+
+/// Returns the letter the card assets use for `suit`: they're named after
+/// the French suits.
+fn asset_letter(suit: Suit) -> &'static str {
+    match suit {
+        Suit::Cups => "H",
+        Suit::Coins => "D",
+        Suit::Clubs => "C",
+        Suit::Swords => "S",
+    }
+}
+
+/// Positions for played cards in the trick, by screen slot (center of table,
+/// counter-clockwise diamond)
 const TRICK_POSITIONS: [(f32, f32); 4] = [
     (0.0, -CARD_SIZE.y), // Player 0 (bottom)
     (CARD_SIZE.y, 0.0),  // Player 1 (right)
@@ -51,7 +122,7 @@ impl Plugin for GameLogic {
             .init_resource::<CollectCardsId>()
             .init_resource::<MarkForDespawnAndContinueId>()
             .init_resource::<CardsBeingCollected>()
-            .insert_resource(GameState(Game::new()))
+            .insert_resource(GameState::new())
             .init_state::<Turn>();
     }
 }
@@ -64,11 +135,14 @@ fn init_scene(
 ) {
     // Load Italian assets
     let mut italian_assets = ItalianAssets(Vec::with_capacity(4));
-    for suit in Suit::iter() {
+    for suit in Suit::ALL {
         let mut cards_in_suit = Vec::with_capacity(10);
-        for rank in ItalianRank::iter() {
-            let sprite_handle =
-                asset_server.load(format!("cards/italian/card-{}-{}.png", suit, rank as u8));
+        for rank in ItalianRank::ALL {
+            let sprite_handle = asset_server.load(format!(
+                "cards/italian/card-{}-{}.png",
+                asset_letter(suit),
+                rank as u8
+            ));
             cards_in_suit.push(sprite_handle);
         }
         italian_assets.0.push(cards_in_suit);
@@ -79,61 +153,21 @@ fn init_scene(
     let sprite_handle = asset_server.load("cards/card-back1.png");
     commands.insert_resource(CardBack(sprite_handle));
 
-    // Spawn POV player (bottom)
-    commands.spawn((
-        Name::new("Player 0"),
-        Transform {
-            translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, 0),
-            ..default()
-        },
-        Player {
-            id: PlayerId::PLAYER_0,
-            cards_counter: 0,
-        },
-        Visibility::default(),
-    ));
-
-    // Spawn player 1 (right)
-    commands.spawn((
-        Name::new("Player 1"),
-        Transform {
-            translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, 1),
-            ..default()
-        },
-        Player {
-            id: PlayerId::PLAYER_1,
-            cards_counter: 0,
-        },
-        Visibility::default(),
-    ));
-
-    // Spawn player 2
-    commands.spawn((
-        Name::new("Player 2"),
-        Transform {
-            translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, 2),
-            ..default()
-        },
-        Player {
-            id: PlayerId::PLAYER_2,
-            cards_counter: 0,
-        },
-        Visibility::default(),
-    ));
-
-    // Spawn player 3
-    commands.spawn((
-        Name::new("Player 3"),
-        Transform {
-            translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, 3),
-            ..default()
-        },
-        Player {
-            id: PlayerId::PLAYER_3,
-            cards_counter: 0,
-        },
-        Visibility::default(),
-    ));
+    // Spawn the players, the POV one at the bottom.
+    for seat in Seat::ALL {
+        commands.spawn((
+            Name::new(seat.to_string()),
+            Transform {
+                translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, screen_slot(seat)),
+                ..default()
+            },
+            Player {
+                seat,
+                cards_counter: 0,
+            },
+            Visibility::default(),
+        ));
+    }
 
     // Spawn score display
     commands.spawn((
@@ -153,8 +187,8 @@ fn init_scene(
     commands.run_system(setup_game_sys.0);
 }
 
-fn player_position(width: f32, height: f32, player_id: usize) -> Vec3 {
-    match player_id {
+fn player_position(width: f32, height: f32, slot: usize) -> Vec3 {
+    match slot {
         0 => Vec3 {
             x: 0.0,
             y: -height * 0.5 + EDGE_MARGIN + CARD_SIZE.y * 0.5,
@@ -175,7 +209,7 @@ fn player_position(width: f32, height: f32, player_id: usize) -> Vec3 {
             y: 0.0,
             z: 0.0,
         },
-        _ => panic!("Invalid player id"),
+        _ => panic!("Invalid screen slot"),
     }
 }
 
@@ -187,32 +221,36 @@ impl FromWorld for SetupGameId {
         SetupGameId(id)
     }
 }
-/// One shot system that gets called after initial setup is done and every time the game has to be started.
+/// One shot system that gets called after initial setup is done and every
+/// time a new hand has to be dealt.
 fn setup_game(
     mut commands: Commands,
-    game: Res<GameState>,
+    mut game: ResMut<GameState>,
     italian_assets: Res<ItalianAssets>,
     card_back: Res<CardBack>,
     mut query: Query<(Entity, &mut Player)>,
     non_pov_play_id: Res<NonPovPlayId>,
     enable_pov_id: Res<EnablePovId>,
 ) {
-    // Distribute cards from Game hands.
-    let mut players: HashMap<usize, _> = HashMap::new();
-    for (entity, mut player) in query.iter_mut() {
-        player.cards_counter = 0;
-        players.insert(player.id.as_usize(), (entity, player));
+    if matches!(game.session.status(), Status::Chance) {
+        match game.session.resolve_chance(&mut rand::rng()) {
+            Ok(update) => game.record(update),
+            Err(e) => warn!("Couldn't deal: {e}"),
+        }
     }
 
-    for i in 0..PLAYERS {
-        let mut cards: Vec<TressetteCard> = game.0.hand(PlayerId::try_from(i).unwrap()).to_vec();
-        let (entity, player) = players.get_mut(&i).unwrap();
-        if i == 0 {
-            cards.sort_by(|a, b| (a.suit() as u8).cmp(&(b.suit() as u8)).then(a.cmp(b)));
+    // Only the POV player's cards are known: the others are dealt face down.
+    let view = game.session.observe(POV);
+    for (entity, mut player) in query.iter_mut() {
+        let seat = player.seat;
+        player.cards_counter = 0;
+        if seat == POV {
+            let mut cards = view.hand().to_vec();
+            cards.sort();
             distribute_to_pov(
                 &mut commands,
                 &italian_assets,
-                *entity,
+                entity,
                 cards,
                 &mut player.cards_counter,
             );
@@ -220,15 +258,15 @@ fn setup_game(
             distribute_to_other(
                 &mut commands,
                 &card_back,
-                *entity,
-                cards,
+                entity,
+                view.hand_sizes()[seat],
                 &mut player.cards_counter,
-                i,
+                screen_slot(seat),
             );
         }
     }
 
-    players_play(game, &mut commands, non_pov_play_id, enable_pov_id);
+    players_play(&game, &mut commands, &non_pov_play_id, &enable_pov_id);
 }
 
 /// Spawns card entities for the POV player.
@@ -247,8 +285,7 @@ fn distribute_to_pov(
     let cards_ids: Vec<_> = cards
         .iter()
         .map(|card| {
-            let image_handle =
-                italian_assets.0[card.suit() as usize][card.rank() as usize - 1].clone();
+            let image_handle = italian_assets.face(*card);
             let id = commands
                 .spawn((
                     Card(*card),
@@ -273,25 +310,25 @@ fn distribute_to_pov(
     commands.entity(entity).add_children(&cards_ids);
 }
 
-/// Spawn card entities for non POV players.
+/// Spawns `count` face-down card entities for a non POV player, drawn at
+/// screen `slot`.
 fn distribute_to_other(
     commands: &mut Commands,
     card_back: &Res<CardBack>,
     entity: Entity,
-    cards: Vec<TressetteCard>,
+    count: usize,
     card_counter: &mut usize,
-    player_id: usize,
+    slot: usize,
 ) {
     let spacing = CARD_SIZE.x * 0.5;
     let num_cards = CARDS_PER_PLAYER;
     let total_width = (num_cards - 1) as f32 * spacing;
     let center_offset = total_width / 2.0;
 
-    let cards_ids: Vec<_> = cards
-        .iter()
-        .map(|card| {
+    let cards_ids: Vec<_> = (0..count)
+        .map(|_| {
             let card_pos = spacing * *card_counter as f32;
-            let (rotation, translation) = match player_id {
+            let (rotation, translation) = match slot {
                 1 => (
                     Quat::from_rotation_z(PI * 0.5),
                     Vec3 {
@@ -320,7 +357,7 @@ fn distribute_to_other(
             };
             let id = commands
                 .spawn((
-                    Card(*card),
+                    FaceDown,
                     Transform {
                         translation,
                         rotation,
@@ -367,10 +404,11 @@ fn select_play_card(
             selected_transform.translation.y -= SELECTION_OFFSET;
             commands.entity(selected_entity).remove::<Selected>();
         } else {
-            match game.0.play_card(card.0) {
-                Ok(_effect) => {
+            match game.session.act(POV, Action::Play(card.0)) {
+                Ok(update) => {
+                    game.record(update);
                     // Move to trick position
-                    let (x, y) = TRICK_POSITIONS[PlayerId::PLAYER_0.as_usize()];
+                    let (x, y) = TRICK_POSITIONS[screen_slot(POV)];
                     commands
                         .entity(clicked_card)
                         .remove::<Playable>()
@@ -386,7 +424,7 @@ fn select_play_card(
                     commands.set_state(Turn::NonPovTurn);
                 }
                 Err(e) => {
-                    warn!("Invalid play: {:?}", e);
+                    warn!("Invalid play: {e}");
                 }
             }
         }
@@ -435,61 +473,47 @@ fn handle_effect(
     game: Res<GameState>,
     mut score_text_query: Query<&mut Text, With<ScoreText>>,
 ) {
-    let effect = game.0.history().last().unwrap().1;
-    match effect {
-        shuftlib::tressette::MoveEffect::CardPlayed => {
-            players_play(game, &mut commands, non_pov_play_id, enable_pov_id);
-        }
-        shuftlib::tressette::MoveEffect::TrickCompleted { .. } => {
-            commands
-                .delayed()
-                .secs(COLLECTION_DELAY)
-                .run_system(collect_cards_id.0);
-        }
-        shuftlib::tressette::MoveEffect::HandComplete {
-            trick_winner: _,
-            score,
-        } => {
-            if let Ok(mut text) = score_text_query.single_mut() {
-                *text = Text::new(format!("Score: {} - {}", score.0, score.1));
-            }
-            commands
-                .delayed()
-                .secs(COLLECTION_DELAY)
-                .run_system(collect_cards_id.0);
-        }
-        shuftlib::tressette::MoveEffect::GameOver {
-            trick_winner: _,
-            final_score,
-        } => {
-            commands
-                .delayed()
-                .secs(COLLECTION_DELAY)
-                .run_system(collect_cards_id.0);
-            if let Ok(mut text) = score_text_query.single_mut() {
-                *text = Text::new(format!(
-                    "Final Score: {} - {}",
-                    final_score.0, final_score.1
-                ));
-            }
-            commands
-                .spawn((
-                    Button,
-                    Node {
-                        position_type: PositionType::Absolute,
-                        top: px(50),
-                        left: px(10),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.5, 0.5, 0.5)),
-                    children![(
-                        Text::new("Restart Game"),
-                        TextFont::from_font_size(24.0),
-                        TextColor(Color::WHITE),
-                    )],
-                ))
-                .observe(restart_game);
-        }
+    if game.trick_taker().is_none() {
+        players_play(&game, &mut commands, &non_pov_play_id, &enable_pov_id);
+        return;
+    }
+
+    commands
+        .delayed()
+        .secs(COLLECTION_DELAY)
+        .run_system(collect_cards_id.0);
+    if let Some(score) = game.hand_score()
+        && let Ok(mut text) = score_text_query.single_mut()
+    {
+        let label = if game.is_over() {
+            "Final Score"
+        } else {
+            "Score"
+        };
+        *text = Text::new(format!(
+            "{label}: {} - {}",
+            score[Team::NorthSouth],
+            score[Team::EastWest]
+        ));
+    }
+    if game.is_over() {
+        commands
+            .spawn((
+                Button,
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: px(50),
+                    left: px(10),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.5, 0.5, 0.5)),
+                children![(
+                    Text::new("Restart Game"),
+                    TextFont::from_font_size(24.0),
+                    TextColor(Color::WHITE),
+                )],
+            ))
+            .observe(restart_game);
     }
 }
 
@@ -512,19 +536,11 @@ fn collect_cards(
     mut cards_being_collected: ResMut<CardsBeingCollected>,
     mut commands: Commands,
 ) {
-    let effect = game.0.history().last().unwrap().1;
-    let winner = match effect {
-        MoveEffect::TrickCompleted { winner } => Some(winner),
-        MoveEffect::HandComplete { trick_winner, .. } => Some(trick_winner),
-        MoveEffect::GameOver { trick_winner, .. } => Some(trick_winner),
-        _ => None,
-    };
-
-    if let Some(winner) = winner {
+    if let Some(taker) = game.trick_taker() {
         let mut count = 0;
         for card in query.iter() {
             commands.entity(card).insert(MovingTo {
-                target: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, winner.as_usize()),
+                target: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, screen_slot(taker)),
                 speed: CARD_SPEED,
                 on_arrival: Some(mark_for_despawn_and_continue_id.0),
             });
@@ -566,17 +582,15 @@ fn mark_for_despawn_and_continue(
             commands.entity(entity).insert(ToDespawn);
         }
 
-        // After marking cards for despawn, check what to do next based on the effect
-        if let Some((_move, effect)) = game.0.history().last() {
-            match effect {
-                MoveEffect::TrickCompleted { winner: _ } => {
-                    players_play(game, &mut commands, non_pov_play_id, enable_pov_id);
-                }
-                MoveEffect::HandComplete { .. } => {
-                    commands.run_system(setup_game_id.0);
-                }
-                _ => {}
-            }
+        // After marking cards for despawn, check what to do next based on the
+        // last step
+        if game.is_over() {
+            return;
+        }
+        if game.hand_score().is_some() {
+            commands.run_system(setup_game_id.0);
+        } else if game.trick_taker().is_some() {
+            players_play(&game, &mut commands, &non_pov_play_id, &enable_pov_id);
         }
     }
 }
@@ -593,7 +607,7 @@ fn restart_game(
     setup_game_id: Res<SetupGameId>,
     mut game: ResMut<GameState>,
     mut score_text_query: Query<&mut Text, With<ScoreText>>,
-    card_query: Query<Entity, With<Card>>,
+    card_query: Query<Entity, Or<(With<Card>, With<FaceDown>)>>,
     mut commands: Commands,
 ) {
     // Mark all cards for despawn
@@ -601,7 +615,7 @@ fn restart_game(
         commands.entity(card_entity).insert(ToDespawn);
     }
     // Reset game state
-    *game = GameState(Game::new());
+    *game = GameState::new();
     // Update score text
     if let Ok(mut text) = score_text_query.single_mut() {
         *text = Text::new("Score: 0 - 0");
@@ -615,15 +629,15 @@ fn restart_game(
 /// One shot system that determines whether it's the POV player's turn or not
 /// and calls the correct system to handle the play operations.
 fn players_play(
-    game: Res<GameState>,
+    game: &GameState,
     commands: &mut Commands,
-    non_pov_play_id: Res<NonPovPlayId>,
-    enable_pov_id: Res<EnablePovId>,
+    non_pov_play_id: &NonPovPlayId,
+    enable_pov_id: &EnablePovId,
 ) {
-    if game.0.current_player() != PlayerId::PLAYER_0 {
-        commands.run_system(non_pov_play_id.0)
-    } else {
-        commands.run_system(enable_pov_id.0);
+    match game.to_act() {
+        Some(POV) => commands.run_system(enable_pov_id.0),
+        Some(_) => commands.run_system(non_pov_play_id.0),
+        None => {}
     }
 }
 
@@ -648,7 +662,7 @@ fn enable_pov(
     mut commands: Commands,
     mut query: Query<(Entity, &Card, &mut Sprite), With<PovCard>>,
 ) {
-    let playable = game.0.legal_cards();
+    let playable = game.session.observe(POV).legal_cards();
     for (entity, card, mut sprite) in query.iter_mut() {
         if playable.contains(&card.0) {
             commands.entity(entity).insert(Playable);
@@ -676,47 +690,63 @@ fn non_pov_play(
     mut commands: Commands,
     handle_effect_id: Res<HandleEffectId>,
     italian_assets: Res<ItalianAssets>,
-    mut query: Query<(Entity, &mut Sprite, &Card)>,
+    players: Query<(&Player, &Children)>,
+    mut face_down: Query<&mut Sprite, With<FaceDown>>,
 ) {
-    let legal_cards = game.0.legal_cards();
-    if let Some(card) = legal_cards.first() {
-        let num_played = game
-            .0
-            .current_trick()
-            .iter()
-            .filter(|c| c.is_some())
-            .count();
-        let player_index = (game.0.trick_leader().as_usize() + num_played) % 4;
-        match game.0.play_card(*card) {
-            Ok(_effect) => {
-                // Move to trick position and show face
-                if let Some((entity, mut sprite, _)) =
-                    query.iter_mut().find(|(_, _, c)| c.0 == *card)
-                {
-                    let (x, y) = TRICK_POSITIONS[player_index];
-                    // Change to face-up sprite
-                    sprite.image =
-                        italian_assets.0[card.suit() as usize][card.rank() as usize - 1].clone();
-                    commands
-                        .entity(entity)
-                        .remove_parent_in_place()
-                        .insert(CardInPlay)
-                        .insert(MovingTo {
-                            target: Vec3::new(x, y, 10.0),
-                            speed: CARD_SPEED,
-                            on_arrival: Some(handle_effect_id.0),
-                        });
-                }
+    let Some(seat) = game.to_act() else {
+        return;
+    };
+    // A bot only knows what its seat may see.
+    let Some(card) = game.session.observe(seat).legal_cards().first().copied() else {
+        return;
+    };
+    match game.session.act(seat, Action::Play(card)) {
+        Ok(update) => {
+            game.record(update);
+            // The bot's cards are face down and carry no identity: reveal the
+            // last one as the card played, and move it to trick position.
+            let Some(entity) = players
+                .iter()
+                .find(|(player, _)| player.seat == seat)
+                .and_then(|(_, children)| {
+                    children
+                        .iter()
+                        .rev()
+                        .find(|&child| face_down.contains(child))
+                })
+            else {
+                return;
+            };
+            if let Ok(mut sprite) = face_down.get_mut(entity) {
+                sprite.image = italian_assets.face(card);
             }
-            Err(e) => {
-                warn!("AI invalid play: {:?}", e);
-            }
+            let (x, y) = TRICK_POSITIONS[screen_slot(seat)];
+            commands
+                .entity(entity)
+                .remove::<FaceDown>()
+                .insert(Card(card))
+                .remove_parent_in_place()
+                .insert(CardInPlay)
+                .insert(MovingTo {
+                    target: Vec3::new(x, y, 10.0),
+                    speed: CARD_SPEED,
+                    on_arrival: Some(handle_effect_id.0),
+                });
+        }
+        Err(e) => {
+            warn!("AI invalid play: {e}");
         }
     }
 }
 
-#[derive(Component, Default)]
+/// A card whose face is shown.
+#[derive(Component)]
 pub struct Card(pub TressetteCard);
+
+/// A card of a non POV player's hand: shown by its back, and with no
+/// identity until it's played.
+#[derive(Component)]
+struct FaceDown;
 
 #[derive(Component, Default)]
 struct Playable;
@@ -744,12 +774,21 @@ struct MovingTo {
 
 #[derive(Component)]
 struct Player {
-    id: PlayerId,
+    seat: Seat,
     cards_counter: usize,
 }
 
+/// The card faces, by suit in [`Suit::ALL`] order, then by rank in
+/// [`ItalianRank::ALL`] order.
 #[derive(Resource)]
 pub struct ItalianAssets(pub Vec<Vec<Handle<Image>>>);
+
+impl ItalianAssets {
+    /// Returns the face of `card`.
+    fn face(&self, card: TressetteCard) -> Handle<Image> {
+        self.0[card.suit() as usize][card.rank() as usize - 1].clone()
+    }
+}
 
 #[derive(Resource)]
 pub struct CardBack(pub Handle<Image>);
