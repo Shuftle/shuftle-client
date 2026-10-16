@@ -143,7 +143,9 @@ jobs:
           print(v["androidCompileSdk"], v["androidBuildTools"], v["androidNdk"])')
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platforms;android-$compile_sdk" "build-tools;$build_tools" "ndk;$ndk" > /dev/null
+          # The runner presets ANDROID_NDK_ROOT to its default NDK: point both at ours.
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
       - name: Build the debug APK
         working-directory: android
         run: ./gradlew assembleDebug

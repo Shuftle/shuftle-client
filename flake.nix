@@ -64,6 +64,8 @@
 
           ANDROID_HOME = androidHome;
           ANDROID_NDK_HOME = "${androidHome}/ndk/${androidNdk}";
+          # Tools read either name: set both so a stray one can't point elsewhere.
+          ANDROID_NDK_ROOT = "${androidHome}/ndk/${androidNdk}";
           JAVA_HOME = jdk21_headless.home;
           # Gradle downloads its own aapt2, which can't run on NixOS: use the SDK's.
           GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidHome}/build-tools/${androidBuildTools}/aapt2";
