@@ -1,0 +1,16 @@
+[package]
+name = "shuftle-mobile"
+version = "0.0.0"
+edition = "2024"
+description = "Android entry point of Shuftle, packaged by the Gradle project in android/"
+license = "AGPL-3.0-only"
+publish = false
+
+[lib]
+# Loaded by the Android activity as libshuftle.so.
+name = "shuftle"
+crate-type = ["cdylib"]
+
+[dependencies]
+bevy = { workspace = true, features = ["android-game-activity"] }
+shuftle-client-core = { path = ".." }

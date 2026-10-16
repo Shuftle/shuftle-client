@@ -1,0 +1,84 @@
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+def minSdkVersion = 31
+def rustAbis = ['arm64-v8a']
+
+// The app version follows the game crate's.
+def cargoVersion = (rootProject.file('../Cargo.toml').text =~ /(?m)^version\s*=\s*"([^"]+)"/)[0][1]
+def (major, minor, patch) = cargoVersion.tokenize('.').collect { it.replaceAll(/\D.*/, '') as int }
+
+// GameActivity's Java side must match the native glue `android-activity`
+// compiles in, so a Bevy upgrade can silently break it.
+def androidActivity = rootProject.file('../Cargo.lock').text =~ /name = "android-activity"\r?\nversion = "([^"]+)"/
+if (!androidActivity.find()) {
+    throw new GradleException(
+        "Cargo.lock no longer has android-activity: check how Bevy now runs on Android, then " +
+        "update the GameActivity setup and gradle/libs.versions.toml.")
+}
+if (androidActivity.group(1) != libs.versions.androidActivity.get()) {
+    throw new GradleException(
+        "Cargo.lock now uses android-activity ${androidActivity.group(1)}. Check which " +
+        "games-activity version its README asks for, then update gamesActivity and " +
+        "androidActivity in gradle/libs.versions.toml.")
+}
+
+android {
+    namespace = 'io.github.shuftle'
+    compileSdk = libs.versions.androidCompileSdk.get() as int
+    buildToolsVersion = libs.versions.androidBuildTools.get()
+    ndkVersion = libs.versions.androidNdk.get()
+
+    defaultConfig {
+        applicationId = 'io.github.shuftle'
+        minSdk = minSdkVersion
+        targetSdk = libs.versions.androidCompileSdk.get() as int
+        versionCode = major * 1000000 + minor * 1000 + patch
+        versionName = cargoVersion
+        ndk {
+            abiFilters.addAll(rustAbis)
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled = false
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    sourceSets {
+        main {
+            assets.srcDirs += files('../../assets')
+        }
+    }
+}
+
+// Builds the Rust library with cargo-ndk for each build type, with the
+// matching cargo profile, and packages it as the app's native library.
+['debug', 'release'].each { buildType ->
+    def name = buildType.capitalize()
+    def outputDir = layout.buildDirectory.dir("rustJniLibs/$buildType").get().asFile
+    def cargoBuild = tasks.register("cargoBuild$name", Exec) {
+        description = "Builds the Rust library for $buildType builds."
+        workingDir = rootProject.file('..')
+        def command = ['cargo', 'ndk', '--platform', "$minSdkVersion", '--output-dir', outputDir.path]
+        rustAbis.each { command += ['--target', it] }
+        command += ['build', '--package', 'shuftle-mobile']
+        if (buildType == 'release') {
+            command += '--release'
+        }
+        commandLine(command)
+    }
+    android.sourceSets[buildType].jniLibs.srcDirs += outputDir
+    tasks.matching { it.name == "merge${name}JniLibFolders" }.configureEach {
+        dependsOn(cargoBuild)
+    }
+}
+
+dependencies {
+    implementation(libs.appcompat)
+    implementation(libs.games.activity)
+}
