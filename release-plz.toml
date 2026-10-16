@@ -3,11 +3,12 @@ git_only = true
 semver_check = false
 release_always = false
 publish = false
-# Explicit: release.yml triggers on these tags, and multi-package workspaces
-# otherwise default to "{{ package }}-v{{ version }}".
+# Explicit: release.yml triggers on these tags.
 git_tag_name = "v{{ version }}"
 
 # Only packages the Android build; versioned through the main crate.
 [[package]]
 name = "shuftle-mobile"
 release = false
+# Its own tags, or it would take the main crate's releases as its own.
+git_tag_name = "shuftle-mobile-v{{ version }}"

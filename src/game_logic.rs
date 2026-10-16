@@ -9,7 +9,10 @@ use shuftlib::{
     tressette::{Action, Event, PerTeam, Seat, Team, Tressette, TressetteCard},
 };
 
-use crate::layout::{BAR_HEIGHT, Place, SAFE_TOP, Side, TableLayout};
+use crate::{
+    layout::{BAR_HEIGHT, Place, SAFE_TOP, Side, TableLayout},
+    table::Glow,
+};
 
 /// The seat of the player in front of the screen.
 const POV: Seat = Seat::South;
@@ -63,6 +66,15 @@ impl GameState {
     }
 }
 
+/// Returns the colour of the team `seat` plays for.
+fn team_color(seat: Seat) -> Color {
+    if seat.team() == POV.team() {
+        US_COLOR
+    } else {
+        THEM_COLOR
+    }
+}
+
 /// Returns the side of the screen `seat` sits at: the POV player at the
 /// bottom, then the others in play order, counter-clockwise.
 fn side(seat: Seat) -> Side {
@@ -89,7 +101,15 @@ fn asset_letter(suit: Suit) -> &'static str {
 const TRAVEL_SECS: f32 = 0.3;
 const COLLECTION_DELAY: f32 = 2.;
 /// Seconds a bot "thinks" before playing.
-const BOT_PLAY_DELAY: f32 = 0.4;
+const BOT_PLAY_DELAY: f32 = 0.7;
+
+/// Colour of what shows whose turn it is.
+const TURN_COLOR: Color = Color::srgb(1., 0.84, 0.45);
+/// Size of a turn glow, relative to its marker.
+const GLOW_SCALE: f32 = 1.7;
+/// Colours of the POV player's team, and of the other one.
+const US_COLOR: Color = Color::srgb(0.55, 0.78, 1.);
+const THEM_COLOR: Color = Color::srgb(1., 0.6, 0.55);
 
 /// Drawing order: hand cards are 1 and up, in hand order. Cards in the same
 /// layer are ordered by [`card_order`], so overlapping ones don't flicker.
@@ -111,7 +131,15 @@ pub struct GameLogic;
 impl Plugin for GameLogic {
     fn build(&self, app: &mut App) {
         app.add_systems(PostStartup, init_scene)
-            .add_systems(Update, (place_cards, place_markers))
+            .add_systems(
+                Update,
+                (
+                    place_cards,
+                    place_markers,
+                    show_turn,
+                    show_score.run_if(resource_changed::<ShownScore>),
+                ),
+            )
             .add_systems(Last, despawn_marked.run_if(any_with_component::<ToDespawn>))
             .init_resource::<SetupGameId>()
             .init_resource::<NonPovPlayId>()
@@ -120,6 +148,7 @@ impl Plugin for GameLogic {
             .init_resource::<CollectCardsId>()
             .init_resource::<MarkForDespawnAndContinueId>()
             .init_resource::<CardsBeingCollected>()
+            .init_resource::<ShownScore>()
             .insert_resource(GameState::new());
     }
 }
@@ -129,6 +158,7 @@ impl Plugin for GameLogic {
 fn init_scene(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    glow: Res<Glow>,
     setup_game_sys: Res<SetupGameId>,
 ) {
     // Load Italian assets
@@ -148,10 +178,12 @@ fn init_scene(
     commands.insert_resource(italian_assets);
 
     // The other players are shown by a card back with how many cards they
-    // hold.
+    // hold, named in their team's colour and glowing when it's their turn.
     let card_back: Handle<Image> = asset_server.load("cards/card-back1.png");
     for seat in Seat::ALL.into_iter().filter(|&seat| seat != POV) {
         let marker = Marker(seat);
+        let name = seat.to_string();
+        let color = team_color(seat);
         commands.spawn_scene(bsn! {
             marker
             Sprite { image: {card_back.clone()} }
@@ -159,6 +191,15 @@ fn init_scene(
                 MarkerCount
                 Text2d
                 Transform { translation: {Vec3::Z} }
+                --
+                MarkerName
+                Text2d({name})
+                TextColor({color})
+                --
+                TurnGlow
+                Sprite { image: {glow.0.clone()} }
+                Transform { translation: {Vec3::NEG_Z} }
+                Visibility::Hidden
             ]
         });
     }
@@ -169,14 +210,34 @@ fn init_scene(
             position_type: PositionType::Absolute,
             width: percent(100),
             height: {px(SAFE_TOP + BAR_HEIGHT)},
-            padding: {UiRect { left: px(12), top: px(SAFE_TOP), ..default() }},
+            padding: {UiRect { left: px(12), right: px(12), top: px(SAFE_TOP), ..default() }},
             align_items: AlignItems::Center,
+            justify_content: JustifyContent::SpaceBetween,
         }
         BackgroundColor({Color::srgba(0., 0., 0., 0.3)})
         Children [
-            Text("Score: 0 - 0")
+            Text
             TextFont { font_size: FontSize::Px(24.) }
             ScoreText
+            Children [
+                TextSpan
+                TextFont { font_size: FontSize::Px(24.) }
+                TextColor({US_COLOR})
+                UsScore
+                --
+                TextSpan("   ")
+                TextFont { font_size: FontSize::Px(24.) }
+                --
+                TextSpan
+                TextFont { font_size: FontSize::Px(24.) }
+                TextColor({THEM_COLOR})
+                ThemScore
+            ]
+            --
+            Text
+            TextFont { font_size: FontSize::Px(24.) }
+            TextColor({TURN_COLOR})
+            TurnText
         ]
     });
 
@@ -387,11 +448,46 @@ fn put(transform: &mut Mut<Transform>, sprite: &mut Mut<Sprite>, at: Vec3, size:
 }
 
 /// Places the other players' markers, showing how many cards they hold.
+/// Shows whose turn it is: a glow pulsing behind the marker of the player to
+/// play, or a note in the top bar for the POV player.
+fn show_turn(
+    layout: Res<TableLayout>,
+    game: Res<GameState>,
+    time: Res<Time>,
+    markers: Query<(&Marker, &Children)>,
+    mut glows: Query<(&mut Sprite, &mut Visibility), With<TurnGlow>>,
+    mut note: Single<&mut Text, With<TurnText>>,
+) {
+    let to_act = game.to_act();
+    for (marker, children) in &markers {
+        for &child in children {
+            let Ok((mut sprite, mut visibility)) = glows.get_mut(child) else {
+                continue;
+            };
+            if to_act != Some(marker.0) {
+                visibility.set_if_neq(Visibility::Hidden);
+                continue;
+            }
+            visibility.set_if_neq(Visibility::Inherited);
+            let size = layout.card_size(Place::Marker(side(marker.0)));
+            sprite.custom_size = Some(size * GLOW_SCALE);
+            let pulse = 0.55 + 0.3 * (time.elapsed_secs() * std::f32::consts::TAU).sin();
+            sprite.color = TURN_COLOR.with_alpha(pulse);
+        }
+    }
+
+    let wanted = if to_act == Some(POV) { "Your turn" } else { "" };
+    if note.0 != wanted {
+        note.0 = wanted.into();
+    }
+}
+
 fn place_markers(
     layout: Res<TableLayout>,
     game: Res<GameState>,
     mut markers: Query<(&Marker, &Children, &mut Transform, &mut Sprite)>,
-    mut counts: Query<(&mut Text2d, &mut TextFont), With<MarkerCount>>,
+    mut counts: Query<(&mut Text2d, &mut TextFont), (With<MarkerCount>, Without<MarkerName>)>,
+    mut names: Query<(&mut Transform, &mut TextFont), (With<MarkerName>, Without<Marker>)>,
 ) {
     let view = game.session.observe(POV);
     for (marker, children, mut transform, mut sprite) in &mut markers {
@@ -415,6 +511,16 @@ fn place_markers(
                 // be sized 0.
                 font.set_if_neq(TextFont::from_font_size((size.y * 0.4).max(1.)));
             }
+            if let Ok((mut name_transform, mut font)) = names.get_mut(child) {
+                let font_size = (size.y * 0.22).max(1.);
+                font.set_if_neq(TextFont::from_font_size(font_size));
+                // Just under the card back.
+                name_transform.set_if_neq(Transform::from_xyz(
+                    0.,
+                    -(size.y + font_size) * 0.5 - 2.,
+                    1.,
+                ));
+            }
         }
     }
 }
@@ -433,7 +539,7 @@ fn handle_effect(
     collect_cards_id: Res<CollectCardsId>,
     mut commands: Commands,
     game: Res<GameState>,
-    mut score_text_query: Query<&mut Text, With<ScoreText>>,
+    mut shown: ResMut<ShownScore>,
 ) {
     if game.trick_taker().is_none() {
         players_play(&game, &mut commands, &non_pov_play_id, &enable_pov_id);
@@ -444,20 +550,31 @@ fn handle_effect(
         .delayed()
         .secs(COLLECTION_DELAY)
         .run_system(collect_cards_id.0);
-    if let Some(score) = game.hand_score()
-        && let Ok(mut text) = score_text_query.single_mut()
-    {
-        let label = if game.is_over() {
-            "Final Score"
+    if let Some(score) = game.hand_score() {
+        let us = POV.team();
+        let them = if us == Team::NorthSouth {
+            Team::EastWest
         } else {
-            "Score"
+            Team::NorthSouth
         };
-        *text = Text::new(format!(
-            "{label}: {} - {}",
-            score[Team::NorthSouth],
-            score[Team::EastWest]
-        ));
+        *shown = ShownScore {
+            us: score[us],
+            them: score[them],
+            is_final: game.is_over(),
+        };
     }
+}
+
+/// Writes the score in the top bar.
+fn show_score(
+    shown: Res<ShownScore>,
+    mut label: Single<&mut Text, With<ScoreText>>,
+    mut us: Single<&mut TextSpan, (With<UsScore>, Without<ThemScore>)>,
+    mut them: Single<&mut TextSpan, With<ThemScore>>,
+) {
+    label.0 = if shown.is_final { "Final  " } else { "" }.into();
+    us.0 = format!("Us {}", shown.us);
+    them.0 = format!("Them {}", shown.them);
 }
 
 #[derive(Component)]
@@ -554,7 +671,7 @@ fn restart_game(
     activate: On<Activate>,
     setup_game_id: Res<SetupGameId>,
     mut game: ResMut<GameState>,
-    mut score_text_query: Query<&mut Text, With<ScoreText>>,
+    mut shown: ResMut<ShownScore>,
     card_query: Query<Entity, With<Card>>,
     mut button_query: Query<&mut Node, With<RestartButton>>,
     mut commands: Commands,
@@ -565,10 +682,7 @@ fn restart_game(
     }
     // Reset game state
     *game = GameState::new();
-    // Update score text
-    if let Ok(mut text) = score_text_query.single_mut() {
-        *text = Text::new("Score: 0 - 0");
-    }
+    *shown = ShownScore::default();
     // Hide the button
     if let Ok(mut node) = button_query.get_mut(activate.entity) {
         node.display = Display::None;
@@ -725,6 +839,33 @@ struct Marker(Seat);
 /// The number of cards on a marker.
 #[derive(Component, Default, Clone)]
 struct MarkerCount;
+
+/// The halo around a marker, shown while that player is to play.
+#[derive(Component, Default, Clone)]
+struct TurnGlow;
+
+/// Says in the top bar when it's the POV player's turn.
+#[derive(Component, Default, Clone)]
+struct TurnText;
+
+/// The name under a marker.
+#[derive(Component, Default, Clone)]
+struct MarkerName;
+
+/// The POV player's team's score, and the other team's, in the top bar.
+#[derive(Component, Default, Clone)]
+struct UsScore;
+
+#[derive(Component, Default, Clone)]
+struct ThemScore;
+
+/// The score the top bar shows.
+#[derive(Resource, Default)]
+struct ShownScore {
+    us: u8,
+    them: u8,
+    is_final: bool,
+}
 
 #[derive(Component, Default, Clone)]
 struct ScoreText;
