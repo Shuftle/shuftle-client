@@ -1,6 +1,21 @@
 version: 2
 updates:
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
+      interval: weekly
+    # Wait before adopting new releases so compromised or broken ones get caught upstream first.
+    cooldown:
+      default-days: 7
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      # One PR for all compatible updates; major bumps still get their own PR.
+      cargo-minor-patch:
+        update-types:
+          - minor
+          - patch

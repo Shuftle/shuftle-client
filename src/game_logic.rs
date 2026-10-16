@@ -1,27 +1,94 @@
-use std::{collections::HashMap, f32::consts::PI};
+use std::f32::consts::PI;
 
 use bevy::{
     ecs::{schedule::common_conditions::any_with_component, system::SystemId},
     prelude::*,
-    text::{Font, TextFont},
-    ui::{Interaction, Node, PositionType, Val},
+    ui_widgets::{Activate, Button},
 };
 use shuftlib::{
-    core::{Suit, italian::ItalianRank},
-    tressette::{Game, MoveEffect, TressetteCard},
-    trick_taking::{PLAYERS, PlayerId},
+    cards::italian::{ItalianRank, Suit},
+    engine::{Session, Status, UpdateOf},
+    tressette::{Action, Event, PerTeam, Seat, Team, Tressette, TressetteCard},
 };
-use strum::IntoEnumIterator;
 
 use crate::camera::CANVAS_SIZE;
 
+/// The seat of the player in front of the screen.
+const POV: Seat = Seat::South;
+
+/// The game, and what the POV player saw of its last step.
 #[derive(Resource)]
-struct GameState(Game);
+struct GameState {
+    session: Session<Tressette>,
+    /// The events of the last step that the POV player may receive.
+    last_events: Vec<Event>,
+}
 
-#[derive(Resource, Default)]
-struct FontHandle(Handle<Font>);
+impl GameState {
+    fn new() -> Self {
+        Self {
+            session: Session::new(()),
+            last_events: Vec::new(),
+        }
+    }
 
-/// Positions for played cards in the trick (center of table, clockwise diamond)
+    /// Keeps the events of `update` that the POV player may receive.
+    fn record(&mut self, update: UpdateOf<Tressette>) {
+        self.last_events = update.for_seat(POV).cloned().collect();
+    }
+
+    /// Returns the seat the game waits on, if any.
+    fn to_act(&self) -> Option<Seat> {
+        self.session.status().to_act().first().copied()
+    }
+
+    /// Returns whether the game is over.
+    fn is_over(&self) -> bool {
+        matches!(self.session.status(), Status::Over(_))
+    }
+
+    /// Returns the seat that took the trick completed by the last step, if
+    /// any.
+    fn trick_taker(&self) -> Option<Seat> {
+        self.last_events.iter().find_map(|event| match event {
+            Event::TrickTaken { trick } => Some(trick.taker()),
+            _ => None,
+        })
+    }
+
+    /// Returns the score of the game, if the last step ended a hand.
+    fn hand_score(&self) -> Option<PerTeam<u8>> {
+        self.last_events.iter().find_map(|event| match event {
+            Event::HandScored { score, .. } => Some(*score),
+            _ => None,
+        })
+    }
+}
+
+/// Returns where `seat` is drawn: 0 is the bottom of the screen (the POV
+/// player), then 1 right, 2 top and 3 left, in play order.
+fn screen_slot(seat: Seat) -> usize {
+    match seat {
+        Seat::South => 0,
+        Seat::East => 1,
+        Seat::North => 2,
+        Seat::West => 3,
+    }
+}
+
+/// Returns the letter the card assets use for `suit`: they're named after
+/// the French suits.
+fn asset_letter(suit: Suit) -> &'static str {
+    match suit {
+        Suit::Cups => "H",
+        Suit::Coins => "D",
+        Suit::Clubs => "C",
+        Suit::Swords => "S",
+    }
+}
+
+/// Positions for played cards in the trick, by screen slot (center of table,
+/// counter-clockwise diamond)
 const TRICK_POSITIONS: [(f32, f32); 4] = [
     (0.0, -CARD_SIZE.y), // Player 0 (bottom)
     (CARD_SIZE.y, 0.0),  // Player 1 (right)
@@ -45,10 +112,7 @@ impl Plugin for GameLogic {
         app.add_systems(PostStartup, init_scene)
             .add_systems(
                 Update,
-                (
-                    move_to_target.run_if(any_with_component::<MovingTo>),
-                    handle_restart_button,
-                ),
+                move_to_target.run_if(any_with_component::<MovingTo>),
             )
             .add_systems(Last, despawn_marked.run_if(any_with_component::<ToDespawn>))
             .init_resource::<SetupGameId>()
@@ -58,10 +122,8 @@ impl Plugin for GameLogic {
             .init_resource::<CollectCardsId>()
             .init_resource::<MarkForDespawnAndContinueId>()
             .init_resource::<CardsBeingCollected>()
-            .init_resource::<CollectionTimer>()
-            .insert_resource(GameState(Game::new()))
-            .init_state::<Turn>()
-            .add_systems(Update, check_collection_timer);
+            .insert_resource(GameState::new())
+            .init_state::<Turn>();
     }
 }
 
@@ -71,17 +133,16 @@ fn init_scene(
     asset_server: Res<AssetServer>,
     setup_game_sys: Res<SetupGameId>,
 ) {
-    // Load default font
-    let font_handle: Handle<Font> = Default::default();
-    commands.insert_resource(FontHandle(font_handle.clone()));
-
     // Load Italian assets
     let mut italian_assets = ItalianAssets(Vec::with_capacity(4));
-    for suit in Suit::iter() {
+    for suit in Suit::ALL {
         let mut cards_in_suit = Vec::with_capacity(10);
-        for rank in ItalianRank::iter() {
-            let sprite_handle =
-                asset_server.load(format!("cards/italian/card-{}-{}.png", suit, rank as u8));
+        for rank in ItalianRank::ALL {
+            let sprite_handle = asset_server.load(format!(
+                "cards/italian/card-{}-{}.png",
+                asset_letter(suit),
+                rank as u8
+            ));
             cards_in_suit.push(sprite_handle);
         }
         italian_assets.0.push(cards_in_suit);
@@ -92,86 +153,63 @@ fn init_scene(
     let sprite_handle = asset_server.load("cards/card-back1.png");
     commands.insert_resource(CardBack(sprite_handle));
 
-    // Spawn POV player (bottom)
-    commands.spawn((
-        Name::new("Player 0"),
-        Transform {
-            translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, 0),
-            ..default()
-        },
-        Player {
-            id: PlayerId::PLAYER_0,
-            cards_counter: 0,
-        },
-        Visibility::default(),
-    ));
-
-    // Spawn player 1 (right)
-    commands.spawn((
-        Name::new("Player 1"),
-        Transform {
-            translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, 1),
-            ..default()
-        },
-        Player {
-            id: PlayerId::PLAYER_1,
-            cards_counter: 0,
-        },
-        Visibility::default(),
-    ));
-
-    // Spawn player 2
-    commands.spawn((
-        Name::new("Player 2"),
-        Transform {
-            translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, 2),
-            ..default()
-        },
-        Player {
-            id: PlayerId::PLAYER_2,
-            cards_counter: 0,
-        },
-        Visibility::default(),
-    ));
-
-    // Spawn player 3
-    commands.spawn((
-        Name::new("Player 3"),
-        Transform {
-            translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, 3),
-            ..default()
-        },
-        Player {
-            id: PlayerId::PLAYER_3,
-            cards_counter: 0,
-        },
-        Visibility::default(),
-    ));
+    // Spawn the players, the POV one at the bottom.
+    for seat in Seat::ALL {
+        commands.spawn((
+            Name::new(seat.to_string()),
+            Transform {
+                translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, screen_slot(seat)),
+                ..default()
+            },
+            Player {
+                seat,
+                cards_counter: 0,
+            },
+            Visibility::default(),
+        ));
+    }
 
     // Spawn score display
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(10.0),
-            left: Val::Px(10.0),
+            top: px(10),
+            left: px(10),
             ..default()
         },
         Text::new("Score: 0 - 0"),
-        TextFont {
-            font: font_handle.clone(),
-            font_size: 24.0,
-            ..default()
-        },
+        TextFont::from_font_size(24.0),
         TextColor(Color::WHITE),
         ScoreText,
     ));
+
+    // Spawn the restart button, hidden until the game is over.
+    commands
+        .spawn((
+            Button,
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(50),
+                left: px(10),
+                display: Display::None,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.5, 0.5, 0.5)),
+            children![(
+                Text::new("Restart Game"),
+                TextFont::from_font_size(24.0),
+                TextColor(Color::WHITE),
+            )],
+            RestartButton,
+        ))
+        .observe(restart_game);
 
     // Call system to setup game.
     commands.run_system(setup_game_sys.0);
 }
 
-fn player_position(width: f32, height: f32, player_id: usize) -> Vec3 {
-    match player_id {
+fn player_position(width: f32, height: f32, slot: usize) -> Vec3 {
+    match slot {
         0 => Vec3 {
             x: 0.0,
             y: -height * 0.5 + EDGE_MARGIN + CARD_SIZE.y * 0.5,
@@ -192,7 +230,7 @@ fn player_position(width: f32, height: f32, player_id: usize) -> Vec3 {
             y: 0.0,
             z: 0.0,
         },
-        _ => panic!("Invalid player id"),
+        _ => panic!("Invalid screen slot"),
     }
 }
 
@@ -204,32 +242,36 @@ impl FromWorld for SetupGameId {
         SetupGameId(id)
     }
 }
-/// One shot system that gets called after initial setup is done and every time the game has to be started.
+/// One shot system that gets called after initial setup is done and every
+/// time a new hand has to be dealt.
 fn setup_game(
     mut commands: Commands,
-    game: Res<GameState>,
+    mut game: ResMut<GameState>,
     italian_assets: Res<ItalianAssets>,
     card_back: Res<CardBack>,
     mut query: Query<(Entity, &mut Player)>,
     non_pov_play_id: Res<NonPovPlayId>,
     enable_pov_id: Res<EnablePovId>,
 ) {
-    // Distribute cards from Game hands.
-    let mut players: HashMap<usize, _> = HashMap::new();
-    for (entity, mut player) in query.iter_mut() {
-        player.cards_counter = 0;
-        players.insert(player.id.as_usize(), (entity, player));
+    if matches!(game.session.status(), Status::Chance) {
+        match game.session.resolve_chance(&mut rand::rng()) {
+            Ok(update) => game.record(update),
+            Err(e) => warn!("Couldn't deal: {e}"),
+        }
     }
 
-    for i in 0..PLAYERS {
-        let mut cards: Vec<TressetteCard> = game.0.hand(PlayerId::try_from(i).unwrap()).to_vec();
-        let (entity, player) = players.get_mut(&i).unwrap();
-        if i == 0 {
-            cards.sort_by(|a, b| (a.suit() as u8).cmp(&(b.suit() as u8)).then(a.cmp(b)));
+    // Only the POV player's cards are known: the others are dealt face down.
+    let view = game.session.observe(POV);
+    for (entity, mut player) in query.iter_mut() {
+        let seat = player.seat;
+        player.cards_counter = 0;
+        if seat == POV {
+            let mut cards = view.hand().to_vec();
+            cards.sort();
             distribute_to_pov(
                 &mut commands,
                 &italian_assets,
-                *entity,
+                entity,
                 cards,
                 &mut player.cards_counter,
             );
@@ -237,15 +279,15 @@ fn setup_game(
             distribute_to_other(
                 &mut commands,
                 &card_back,
-                *entity,
-                cards,
+                entity,
+                view.hand_sizes()[seat],
                 &mut player.cards_counter,
-                i,
+                screen_slot(seat),
             );
         }
     }
 
-    players_play(game, &mut commands, non_pov_play_id, enable_pov_id);
+    players_play(&game, &mut commands, &non_pov_play_id, &enable_pov_id);
 }
 
 /// Spawns card entities for the POV player.
@@ -264,27 +306,22 @@ fn distribute_to_pov(
     let cards_ids: Vec<_> = cards
         .iter()
         .map(|card| {
-            let image_handle =
-                italian_assets.0[card.suit() as usize][card.rank() as usize - 1].clone();
+            let image_handle = italian_assets.face(*card);
             let id = commands
-                .spawn(Cardbundle {
-                    card: Card(*card),
-                    sprite: Sprite {
+                .spawn((
+                    Card(*card),
+                    Sprite {
                         custom_size: Some(CARD_SIZE),
                         image: image_handle,
                         ..default()
                     },
-                    transform: Transform {
-                        translation: Vec3 {
-                            x: spacing * *card_counter as f32 - center_offset,
-                            z: *card_counter as f32,
-                            ..default()
-                        },
-                        ..default()
-                    },
-                    pickable: Pickable::default(),
-                    pov: PovCard,
-                })
+                    Transform::from_xyz(
+                        spacing * *card_counter as f32 - center_offset,
+                        0.,
+                        *card_counter as f32,
+                    ),
+                    PovCard,
+                ))
                 .observe(select_play_card)
                 .id();
             *card_counter += 1;
@@ -294,25 +331,25 @@ fn distribute_to_pov(
     commands.entity(entity).add_children(&cards_ids);
 }
 
-/// Spawn card entities for non POV players.
+/// Spawns `count` face-down card entities for a non POV player, drawn at
+/// screen `slot`.
 fn distribute_to_other(
     commands: &mut Commands,
     card_back: &Res<CardBack>,
     entity: Entity,
-    cards: Vec<TressetteCard>,
+    count: usize,
     card_counter: &mut usize,
-    player_id: usize,
+    slot: usize,
 ) {
     let spacing = CARD_SIZE.x * 0.5;
     let num_cards = CARDS_PER_PLAYER;
     let total_width = (num_cards - 1) as f32 * spacing;
     let center_offset = total_width / 2.0;
 
-    let cards_ids: Vec<_> = cards
-        .iter()
-        .map(|card| {
+    let cards_ids: Vec<_> = (0..count)
+        .map(|_| {
             let card_pos = spacing * *card_counter as f32;
-            let (rotation, translation) = match player_id {
+            let (rotation, translation) = match slot {
                 1 => (
                     Quat::from_rotation_z(PI * 0.5),
                     Vec3 {
@@ -341,7 +378,7 @@ fn distribute_to_other(
             };
             let id = commands
                 .spawn((
-                    Card(*card),
+                    FaceDown,
                     Transform {
                         translation,
                         rotation,
@@ -362,11 +399,13 @@ fn distribute_to_other(
 }
 const CARD_SPEED: f32 = 1000.0;
 const COLLECTION_DELAY: f32 = 2.;
+/// Seconds a bot "thinks" before playing.
+const BOT_PLAY_DELAY: f32 = 0.4;
 const SELECTION_OFFSET: f32 = 20.;
 
 /// This is called when the POV player clicks on one of their cards.
 fn select_play_card(
-    click: On<Pointer<Click>>,
+    click: On<PointerClick>,
     mut game: ResMut<GameState>,
     mut selected_card_query: Query<
         (Entity, &mut Transform, &Card),
@@ -381,18 +420,18 @@ fn select_play_card(
         return;
     }
 
-    let click_event = click.event();
-    let clicked_card = click_event.entity;
+    let clicked_card = click.entity;
 
     for (selected_entity, mut selected_transform, card) in selected_card_query.iter_mut() {
         if selected_entity != clicked_card {
             selected_transform.translation.y -= SELECTION_OFFSET;
             commands.entity(selected_entity).remove::<Selected>();
         } else {
-            match game.0.play_card(card.0) {
-                Ok(_effect) => {
+            match game.session.act(POV, Action::Play(card.0)) {
+                Ok(update) => {
+                    game.record(update);
                     // Move to trick position
-                    let (x, y) = TRICK_POSITIONS[PlayerId::PLAYER_0.as_usize()];
+                    let (x, y) = TRICK_POSITIONS[screen_slot(POV)];
                     commands
                         .entity(clicked_card)
                         .remove::<Playable>()
@@ -408,7 +447,7 @@ fn select_play_card(
                     commands.set_state(Turn::NonPovTurn);
                 }
                 Err(e) => {
-                    warn!("Invalid play: {:?}", e);
+                    warn!("Invalid play: {e}");
                 }
             }
         }
@@ -453,72 +492,37 @@ fn handle_effect(
     non_pov_play_id: Res<NonPovPlayId>,
     enable_pov_id: Res<EnablePovId>,
     collect_cards_id: Res<CollectCardsId>,
-    font: Res<FontHandle>,
     mut commands: Commands,
     game: Res<GameState>,
     mut score_text_query: Query<&mut Text, With<ScoreText>>,
 ) {
-    let effect = game.0.history().last().unwrap().1;
-    match effect {
-        shuftlib::tressette::MoveEffect::CardPlayed => {
-            players_play(game, &mut commands, non_pov_play_id, enable_pov_id);
-        }
-        shuftlib::tressette::MoveEffect::TrickCompleted { .. } => {
-            commands.insert_resource(CollectionTimer::new(collect_cards_id.0));
-        }
-        shuftlib::tressette::MoveEffect::HandComplete {
-            trick_winner: _,
-            score,
-        } => {
-            if let Ok(mut text) = score_text_query.single_mut() {
-                *text = Text::new(format!("Score: {} - {}", score.0, score.1));
-            }
-            commands.insert_resource(CollectionTimer::new(collect_cards_id.0));
-        }
-        shuftlib::tressette::MoveEffect::GameOver {
-            trick_winner: _,
-            final_score,
-        } => {
-            commands.insert_resource(CollectionTimer::new(collect_cards_id.0));
-            if let Ok(mut text) = score_text_query.single_mut() {
-                *text = Text::new(format!(
-                    "Final Score: {} - {}",
-                    final_score.0, final_score.1
-                ));
-            }
-            // Spawn restart button
-            commands
-                .spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        top: Val::Px(50.0),
-                        left: Val::Px(10.0),
-                        ..default()
-                    },
-                    Interaction::None,
-                    BackgroundColor(Color::srgb(0.5, 0.5, 0.5)),
-                    RestartButton,
-                ))
-                .with_children(|parent| {
-                    parent.spawn((
-                        Text::new("Restart Game"),
-                        TextFont {
-                            font: font.0.clone(),
-                            font_size: 24.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
-                });
-        }
+    if game.trick_taker().is_none() {
+        players_play(&game, &mut commands, &non_pov_play_id, &enable_pov_id);
+        return;
+    }
+
+    commands
+        .delayed()
+        .secs(COLLECTION_DELAY)
+        .run_system(collect_cards_id.0);
+    if let Some(score) = game.hand_score()
+        && let Ok(mut text) = score_text_query.single_mut()
+    {
+        let label = if game.is_over() {
+            "Final Score"
+        } else {
+            "Score"
+        };
+        *text = Text::new(format!(
+            "{label}: {} - {}",
+            score[Team::NorthSouth],
+            score[Team::EastWest]
+        ));
     }
 }
 
 #[derive(Component)]
 struct ToDespawn;
-
-#[derive(Component)]
-struct RestartButton;
 
 #[derive(Resource)]
 struct CollectCardsId(SystemId);
@@ -536,19 +540,11 @@ fn collect_cards(
     mut cards_being_collected: ResMut<CardsBeingCollected>,
     mut commands: Commands,
 ) {
-    let effect = game.0.history().last().unwrap().1;
-    let winner = match effect {
-        MoveEffect::TrickCompleted { winner } => Some(winner),
-        MoveEffect::HandComplete { trick_winner, .. } => Some(trick_winner),
-        MoveEffect::GameOver { trick_winner, .. } => Some(trick_winner),
-        _ => None,
-    };
-
-    if let Some(winner) = winner {
+    if let Some(taker) = game.trick_taker() {
         let mut count = 0;
         for card in query.iter() {
             commands.entity(card).insert(MovingTo {
-                target: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, winner.as_usize()),
+                target: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, screen_slot(taker)),
                 speed: CARD_SPEED,
                 on_arrival: Some(mark_for_despawn_and_continue_id.0),
             });
@@ -560,38 +556,6 @@ fn collect_cards(
 
 #[derive(Resource, Default)]
 struct CardsBeingCollected(usize);
-
-#[derive(Resource, Default)]
-struct CollectionTimer {
-    timer: Option<Timer>,
-    callback: Option<SystemId>,
-}
-
-impl CollectionTimer {
-    fn new(callback: SystemId) -> Self {
-        Self {
-            timer: Some(Timer::from_seconds(COLLECTION_DELAY, TimerMode::Once)),
-            callback: Some(callback),
-        }
-    }
-}
-
-fn check_collection_timer(
-    mut timer: ResMut<CollectionTimer>,
-    time: Res<Time>,
-    mut commands: Commands,
-) {
-    if let Some(ref mut t) = timer.timer {
-        t.tick(time.delta());
-        if t.just_finished() {
-            if let Some(callback) = timer.callback {
-                commands.run_system(callback);
-            }
-            timer.timer = None;
-            timer.callback = None;
-        }
-    }
-}
 
 #[derive(Resource)]
 struct MarkForDespawnAndContinueId(SystemId);
@@ -608,6 +572,7 @@ fn mark_for_despawn_and_continue(
     setup_game_id: Res<SetupGameId>,
     game: Res<GameState>,
     mut cards_being_collected: ResMut<CardsBeingCollected>,
+    mut button_query: Query<&mut Node, With<RestartButton>>,
     mut commands: Commands,
 ) {
     // Decrement counter for the card that just arrived
@@ -622,17 +587,16 @@ fn mark_for_despawn_and_continue(
             commands.entity(entity).insert(ToDespawn);
         }
 
-        // After marking cards for despawn, check what to do next based on the effect
-        if let Some((_move, effect)) = game.0.history().last() {
-            match effect {
-                MoveEffect::TrickCompleted { winner: _ } => {
-                    players_play(game, &mut commands, non_pov_play_id, enable_pov_id);
-                }
-                MoveEffect::HandComplete { .. } => {
-                    commands.run_system(setup_game_id.0);
-                }
-                _ => {}
+        // After marking cards for despawn, check what to do next based on the
+        // last step
+        if game.is_over() {
+            if let Ok(mut node) = button_query.single_mut() {
+                node.display = Display::Flex;
             }
+        } else if game.hand_score().is_some() {
+            commands.run_system(setup_game_id.0);
+        } else if game.trick_taker().is_some() {
+            players_play(&game, &mut commands, &non_pov_play_id, &enable_pov_id);
         }
     }
 }
@@ -643,46 +607,51 @@ fn despawn_marked(mut commands: Commands, query: Query<Entity, With<ToDespawn>>)
     }
 }
 
-fn handle_restart_button(
-    interaction_query: Query<(Entity, &Interaction), (Changed<Interaction>, With<RestartButton>)>,
+/// Called when the restart button, shown once the game is over, is activated.
+fn restart_game(
+    activate: On<Activate>,
     setup_game_id: Res<SetupGameId>,
     mut game: ResMut<GameState>,
     mut score_text_query: Query<&mut Text, With<ScoreText>>,
-    card_query: Query<Entity, With<Card>>,
+    card_query: Query<Entity, Or<(With<Card>, With<FaceDown>)>>,
+    mut button_query: Query<&mut Node, With<RestartButton>>,
     mut commands: Commands,
 ) {
-    for (entity, interaction) in interaction_query.iter() {
-        if *interaction == Interaction::Pressed {
-            // Mark all cards for despawn
-            for card_entity in card_query.iter() {
-                commands.entity(card_entity).insert(ToDespawn);
-            }
-            // Reset game state
-            *game = GameState(Game::new());
-            // Update score text
-            if let Ok(mut text) = score_text_query.single_mut() {
-                *text = Text::new("Score: 0 - 0");
-            }
-            // Despawn the button
-            commands.entity(entity).despawn();
-            // Restart game
-            commands.run_system(setup_game_id.0);
-        }
+    // Mark all cards for despawn
+    for card_entity in card_query.iter() {
+        commands.entity(card_entity).insert(ToDespawn);
     }
+    // Reset game state
+    *game = GameState::new();
+    // Update score text
+    if let Ok(mut text) = score_text_query.single_mut() {
+        *text = Text::new("Score: 0 - 0");
+    }
+    // Hide the button
+    if let Ok(mut node) = button_query.get_mut(activate.entity) {
+        node.display = Display::None;
+    }
+    // Restart game
+    commands.run_system(setup_game_id.0);
 }
 
 /// One shot system that determines whether it's the POV player's turn or not
 /// and calls the correct system to handle the play operations.
 fn players_play(
-    game: Res<GameState>,
+    game: &GameState,
     commands: &mut Commands,
-    non_pov_play_id: Res<NonPovPlayId>,
-    enable_pov_id: Res<EnablePovId>,
+    non_pov_play_id: &NonPovPlayId,
+    enable_pov_id: &EnablePovId,
 ) {
-    if game.0.current_player() != PlayerId::PLAYER_0 {
-        commands.run_system(non_pov_play_id.0)
-    } else {
-        commands.run_system(enable_pov_id.0);
+    match game.to_act() {
+        Some(POV) => commands.run_system(enable_pov_id.0),
+        // The delay also lets freshly dealt cards get their GlobalTransform,
+        // which `non_pov_play` relies on to take them out of the hand.
+        Some(_) => commands
+            .delayed()
+            .secs(BOT_PLAY_DELAY)
+            .run_system(non_pov_play_id.0),
+        None => {}
     }
 }
 
@@ -707,7 +676,7 @@ fn enable_pov(
     mut commands: Commands,
     mut query: Query<(Entity, &Card, &mut Sprite), With<PovCard>>,
 ) {
-    let playable = game.0.legal_cards();
+    let playable = game.session.observe(POV).legal_cards();
     for (entity, card, mut sprite) in query.iter_mut() {
         if playable.contains(&card.0) {
             commands.entity(entity).insert(Playable);
@@ -735,52 +704,70 @@ fn non_pov_play(
     mut commands: Commands,
     handle_effect_id: Res<HandleEffectId>,
     italian_assets: Res<ItalianAssets>,
-    mut query: Query<(Entity, &mut Sprite, &Card)>,
+    players: Query<(&Player, &Children)>,
+    mut face_down: Query<&mut Sprite, With<FaceDown>>,
 ) {
-    let legal_cards = game.0.legal_cards();
-    if let Some(card) = legal_cards.first() {
-        let num_played = game
-            .0
-            .current_trick()
-            .iter()
-            .filter(|c| c.is_some())
-            .count();
-        let player_index = (game.0.trick_leader().as_usize() + num_played) % 4;
-        match game.0.play_card(*card) {
-            Ok(_effect) => {
-                // Move to trick position and show face
-                if let Some((entity, mut sprite, _)) =
-                    query.iter_mut().find(|(_, _, c)| c.0 == *card)
-                {
-                    let (x, y) = TRICK_POSITIONS[player_index];
-                    // Change to face-up sprite
-                    sprite.image =
-                        italian_assets.0[card.suit() as usize][card.rank() as usize - 1].clone();
-                    commands
-                        .entity(entity)
-                        .remove_parent_in_place()
-                        .insert(CardInPlay)
-                        .insert(MovingTo {
-                            target: Vec3::new(x, y, 10.0),
-                            speed: CARD_SPEED,
-                            on_arrival: Some(handle_effect_id.0),
-                        });
-                }
+    let Some(seat) = game.to_act() else {
+        return;
+    };
+    // A bot only knows what its seat may see.
+    let Some(card) = game.session.observe(seat).legal_cards().first().copied() else {
+        return;
+    };
+    match game.session.act(seat, Action::Play(card)) {
+        Ok(update) => {
+            game.record(update);
+            // The bot's cards are face down and carry no identity: reveal the
+            // last one as the card played, and move it to trick position.
+            let Some(entity) = players
+                .iter()
+                .find(|(player, _)| player.seat == seat)
+                .and_then(|(_, children)| {
+                    children
+                        .iter()
+                        .rev()
+                        .find(|&child| face_down.contains(child))
+                })
+            else {
+                return;
+            };
+            if let Ok(mut sprite) = face_down.get_mut(entity) {
+                sprite.image = italian_assets.face(card);
             }
-            Err(e) => {
-                warn!("AI invalid play: {:?}", e);
-            }
+            let (x, y) = TRICK_POSITIONS[screen_slot(seat)];
+            commands
+                .entity(entity)
+                .remove::<FaceDown>()
+                .insert(Card(card))
+                .remove_parent_in_place()
+                .insert(CardInPlay)
+                .insert(MovingTo {
+                    target: Vec3::new(x, y, 10.0),
+                    speed: CARD_SPEED,
+                    on_arrival: Some(handle_effect_id.0),
+                });
+        }
+        Err(e) => {
+            warn!("AI invalid play: {e}");
         }
     }
 }
 
-#[derive(Component, Default)]
+/// A card whose face is shown.
+#[derive(Component)]
 pub struct Card(pub TressetteCard);
+
+/// A card of a non POV player's hand: shown by its back, and with no
+/// identity until it's played.
+#[derive(Component)]
+struct FaceDown;
 
 #[derive(Component, Default)]
 struct Playable;
 
+/// A card in the POV player's hand, which they can click to select and play.
 #[derive(Component, Default)]
+#[require(Pickable)]
 struct PovCard;
 
 #[derive(Component, Default)]
@@ -792,6 +779,10 @@ struct CardInPlay;
 #[derive(Component)]
 struct ScoreText;
 
+/// The restart button, shown only once the game is over.
+#[derive(Component)]
+struct RestartButton;
+
 #[derive(Component)]
 struct MovingTo {
     target: Vec3,
@@ -799,23 +790,23 @@ struct MovingTo {
     on_arrival: Option<SystemId>,
 }
 
-#[derive(Bundle, Default)]
-struct Cardbundle {
-    pub transform: Transform,
-    pub card: Card,
-    pub sprite: Sprite,
-    pub pickable: Pickable,
-    pub pov: PovCard,
-}
-
 #[derive(Component)]
 struct Player {
-    id: PlayerId,
+    seat: Seat,
     cards_counter: usize,
 }
 
+/// The card faces, by suit in [`Suit::ALL`] order, then by rank in
+/// [`ItalianRank::ALL`] order.
 #[derive(Resource)]
 pub struct ItalianAssets(pub Vec<Vec<Handle<Image>>>);
+
+impl ItalianAssets {
+    /// Returns the face of `card`.
+    fn face(&self, card: TressetteCard) -> Handle<Image> {
+        self.0[card.suit() as usize][card.rank() as usize - 1].clone()
+    }
+}
 
 #[derive(Resource)]
 pub struct CardBack(pub Handle<Image>);

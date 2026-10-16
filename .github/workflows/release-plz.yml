@@ -5,12 +5,40 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
-  # Create a PR with the new versions and changelog, preparing the next release.
+  release-plz-release:
+    name: Release-plz release
+    runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'shuftle' }}
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # release-plz builds the crate, so it needs Bevy's system libraries.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
+      - name: Run release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   release-plz-pr:
     name: Release-plz PR
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'Shuftle' }}
+    if: ${{ github.repository_owner == 'shuftle' }}
     permissions:
       contents: write
       pull-requests: write
@@ -23,9 +51,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # release-plz builds the crate, so it needs Bevy's system libraries.
       - name: Install system dependencies
         run: |
           sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
@@ -33,35 +61,5 @@ jobs:
         uses: release-plz/action@v0.5
         with:
           command: release-pr
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Create a GitHub release after the release PR is merged.
-  release-plz-release:
-    name: Release-plz Release
-    runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'Shuftle' }}
-    permissions:
-      contents: write
-      pull-requests: read
-    concurrency:
-      group: release-plz-release-${{ github.ref }}
-      cancel-in-progress: false
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
-      - name: Run release-plz
-        uses: release-plz/action@v0.5
-        with:
-          command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

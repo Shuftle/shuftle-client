@@ -7,9 +7,26 @@ on:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       - "**/deny.toml"
+  workflow_dispatch:
+permissions:
+  contents: read
+
 jobs:
-  security_audit:
+  cargo-deny:
+    name: cargo deny ${{ matrix.checks }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        checks:
+          - advisories
+          - bans licenses sources
+    # A newly published advisory should not block unrelated PRs; scheduled runs still fail on it.
+    continue-on-error: ${{ matrix.checks == 'advisories' && github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check ${{ matrix.checks }}
