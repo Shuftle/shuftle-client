@@ -390,17 +390,11 @@ fn put(transform: &mut Mut<Transform>, sprite: &mut Mut<Sprite>, at: Vec3, size:
 fn place_markers(
     layout: Res<TableLayout>,
     game: Res<GameState>,
-    mut markers: Query<(
-        &Marker,
-        &Children,
-        &mut Transform,
-        &mut Sprite,
-        &mut Visibility,
-    )>,
+    mut markers: Query<(&Marker, &Children, &mut Transform, &mut Sprite)>,
     mut counts: Query<(&mut Text2d, &mut TextFont), With<MarkerCount>>,
 ) {
     let view = game.session.observe(POV);
-    for (marker, children, mut transform, mut sprite, mut visibility) in &mut markers {
+    for (marker, children, mut transform, mut sprite) in &mut markers {
         let place = Place::Marker(side(marker.0));
         let size = layout.card_size(place);
         put(
@@ -411,11 +405,6 @@ fn place_markers(
         );
 
         let count = view.hand_sizes()[marker.0];
-        visibility.set_if_neq(if count == 0 {
-            Visibility::Hidden
-        } else {
-            Visibility::Inherited
-        });
         for &child in children {
             if let Ok((mut text, mut font)) = counts.get_mut(child) {
                 let count = count.to_string();
