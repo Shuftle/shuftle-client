@@ -1,9 +1,11 @@
 pub mod camera;
 pub mod game_logic;
+pub mod layout;
 
 use bevy::prelude::*;
 use camera::CameraPlugin;
 use game_logic::GameLogic;
+use layout::LayoutPlugin;
 
 /// Builds the game with `window` as its primary window, ready to `run`.
 pub fn app(window: Window) -> App {
@@ -19,6 +21,7 @@ pub fn app(window: Window) -> App {
                 meta_check: bevy::asset::AssetMetaCheck::Never,
                 ..default()
             }),
+        LayoutPlugin,
         GameLogic,
         CameraPlugin,
     ));
