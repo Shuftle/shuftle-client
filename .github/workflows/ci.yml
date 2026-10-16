@@ -87,6 +87,21 @@ jobs:
       - name: Linting
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
+  wasm:
+    name: Wasm check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Linting
+        run: cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings
+
   dependencies:
     name: Unused dependencies
     runs-on: ubuntu-latest
@@ -96,3 +111,39 @@ jobs:
           persist-credentials: false
       - name: Machete
         uses: bnjbvr/cargo-machete@v0.9.2
+
+  android:
+    name: Android build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-ndk
+        run: cargo install --locked cargo-ndk
+      # Same as the test jobs: CI only checks that the app builds.
+      - name: Skip optimising dependencies
+        run: printf '[profile.dev.package."*"]\nopt-level = 0\n' >> ~/.cargo/config.toml
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      # Also validates the Gradle wrapper checked into the repo.
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Install Android SDK packages
+        # The versions come from the Gradle version catalog, as in flake.nix.
+        run: |
+          read -r compile_sdk build_tools ndk < <(python3 -c '
+          import tomllib
+          v = tomllib.load(open("android/gradle/libs.versions.toml", "rb"))["versions"]
+          print(v["androidCompileSdk"], v["androidBuildTools"], v["androidNdk"])')
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-$compile_sdk" "build-tools;$build_tools" "ndk;$ndk" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
+      - name: Build the debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
