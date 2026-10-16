@@ -183,6 +183,27 @@ fn init_scene(
         ScoreText,
     ));
 
+    // Spawn the restart button, hidden until the game is over.
+    commands
+        .spawn((
+            Button,
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(50),
+                left: px(10),
+                display: Display::None,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.5, 0.5, 0.5)),
+            children![(
+                Text::new("Restart Game"),
+                TextFont::from_font_size(24.0),
+                TextColor(Color::WHITE),
+            )],
+            RestartButton,
+        ))
+        .observe(restart_game);
+
     // Call system to setup game.
     commands.run_system(setup_game_sys.0);
 }
@@ -378,6 +399,8 @@ fn distribute_to_other(
 }
 const CARD_SPEED: f32 = 1000.0;
 const COLLECTION_DELAY: f32 = 2.;
+/// Seconds a bot "thinks" before playing.
+const BOT_PLAY_DELAY: f32 = 0.4;
 const SELECTION_OFFSET: f32 = 20.;
 
 /// This is called when the POV player clicks on one of their cards.
@@ -496,25 +519,6 @@ fn handle_effect(
             score[Team::EastWest]
         ));
     }
-    if game.is_over() {
-        commands
-            .spawn((
-                Button,
-                Node {
-                    position_type: PositionType::Absolute,
-                    top: px(50),
-                    left: px(10),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.5, 0.5, 0.5)),
-                children![(
-                    Text::new("Restart Game"),
-                    TextFont::from_font_size(24.0),
-                    TextColor(Color::WHITE),
-                )],
-            ))
-            .observe(restart_game);
-    }
 }
 
 #[derive(Component)]
@@ -568,6 +572,7 @@ fn mark_for_despawn_and_continue(
     setup_game_id: Res<SetupGameId>,
     game: Res<GameState>,
     mut cards_being_collected: ResMut<CardsBeingCollected>,
+    mut button_query: Query<&mut Node, With<RestartButton>>,
     mut commands: Commands,
 ) {
     // Decrement counter for the card that just arrived
@@ -585,9 +590,10 @@ fn mark_for_despawn_and_continue(
         // After marking cards for despawn, check what to do next based on the
         // last step
         if game.is_over() {
-            return;
-        }
-        if game.hand_score().is_some() {
+            if let Ok(mut node) = button_query.single_mut() {
+                node.display = Display::Flex;
+            }
+        } else if game.hand_score().is_some() {
             commands.run_system(setup_game_id.0);
         } else if game.trick_taker().is_some() {
             players_play(&game, &mut commands, &non_pov_play_id, &enable_pov_id);
@@ -608,6 +614,7 @@ fn restart_game(
     mut game: ResMut<GameState>,
     mut score_text_query: Query<&mut Text, With<ScoreText>>,
     card_query: Query<Entity, Or<(With<Card>, With<FaceDown>)>>,
+    mut button_query: Query<&mut Node, With<RestartButton>>,
     mut commands: Commands,
 ) {
     // Mark all cards for despawn
@@ -620,8 +627,10 @@ fn restart_game(
     if let Ok(mut text) = score_text_query.single_mut() {
         *text = Text::new("Score: 0 - 0");
     }
-    // Despawn the button
-    commands.entity(activate.entity).despawn();
+    // Hide the button
+    if let Ok(mut node) = button_query.get_mut(activate.entity) {
+        node.display = Display::None;
+    }
     // Restart game
     commands.run_system(setup_game_id.0);
 }
@@ -636,7 +645,12 @@ fn players_play(
 ) {
     match game.to_act() {
         Some(POV) => commands.run_system(enable_pov_id.0),
-        Some(_) => commands.run_system(non_pov_play_id.0),
+        // The delay also lets freshly dealt cards get their GlobalTransform,
+        // which `non_pov_play` relies on to take them out of the hand.
+        Some(_) => commands
+            .delayed()
+            .secs(BOT_PLAY_DELAY)
+            .run_system(non_pov_play_id.0),
         None => {}
     }
 }
@@ -764,6 +778,10 @@ struct CardInPlay;
 
 #[derive(Component)]
 struct ScoreText;
+
+/// The restart button, shown only once the game is over.
+#[derive(Component)]
+struct RestartButton;
 
 #[derive(Component)]
 struct MovingTo {
