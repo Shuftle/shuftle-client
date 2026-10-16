@@ -19,13 +19,27 @@ const GRAIN_SIZE: u32 = 128;
 /// How much the grain darkens the felt, at most.
 const GRAIN_STRENGTH: f32 = 0.04;
 
+/// Side of the glow texture, which is stretched around what glows.
+const GLOW_SIZE: u32 = 64;
+
 pub struct TablePlugin;
 
 impl Plugin for TablePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ClearColor(Color::srgb(EDGE[0], EDGE[1], EDGE[2])))
+            .init_resource::<Glow>()
             .add_systems(Startup, spawn_felt)
             .add_systems(Update, size_felt.run_if(resource_changed::<TableLayout>));
+    }
+}
+
+/// A soft white halo, to tint and put behind something to make it stand out.
+#[derive(Resource)]
+pub struct Glow(pub Handle<Image>);
+
+impl FromWorld for Glow {
+    fn from_world(world: &mut World) -> Self {
+        Self(world.resource_mut::<Assets<Image>>().add(glow_image()))
     }
 }
 
@@ -78,6 +92,16 @@ fn vignette_image() -> Image {
 fn grain_image() -> Image {
     image(GRAIN_SIZE, |x, y| {
         [0., 0., 0., noise(x, y) * GRAIN_STRENGTH]
+    })
+}
+
+/// Draws a glow: a white rectangle whose edges fade out.
+fn glow_image() -> Image {
+    image(GLOW_SIZE, |x, y| {
+        let uv = (Vec2::new(x as f32, y as f32) + 0.5) / GLOW_SIZE as f32 * 2. - 1.;
+        // How far out of the solid middle, from 0 there to 1 at the edge.
+        let out = ((uv.abs() - 0.5).max(Vec2::ZERO) / 0.5).length().min(1.);
+        [1., 1., 1., 1. - out * out * (3. - 2. * out)]
     })
 }
 
