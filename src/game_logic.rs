@@ -1,5 +1,3 @@
-use std::f32::consts::PI;
-
 use bevy::{
     ecs::{schedule::common_conditions::any_with_component, system::SystemId},
     prelude::*,
@@ -11,7 +9,7 @@ use shuftlib::{
     tressette::{Action, Event, PerTeam, Seat, Team, Tressette, TressetteCard},
 };
 
-use crate::camera::CANVAS_SIZE;
+use crate::layout::{BAR_HEIGHT, Place, SAFE_TOP, Side, TableLayout};
 
 /// The seat of the player in front of the screen.
 const POV: Seat = Seat::South;
@@ -65,14 +63,14 @@ impl GameState {
     }
 }
 
-/// Returns where `seat` is drawn: 0 is the bottom of the screen (the POV
-/// player), then 1 right, 2 top and 3 left, in play order.
-fn screen_slot(seat: Seat) -> usize {
+/// Returns the side of the screen `seat` sits at: the POV player at the
+/// bottom, then the others in play order, counter-clockwise.
+fn side(seat: Seat) -> Side {
     match seat {
-        Seat::South => 0,
-        Seat::East => 1,
-        Seat::North => 2,
-        Seat::West => 3,
+        Seat::South => Side::Bottom,
+        Seat::East => Side::Right,
+        Seat::North => Side::Top,
+        Seat::West => Side::Left,
     }
 }
 
@@ -87,33 +85,33 @@ fn asset_letter(suit: Suit) -> &'static str {
     }
 }
 
-/// Positions for played cards in the trick, by screen slot (center of table,
-/// counter-clockwise diamond)
-const TRICK_POSITIONS: [(f32, f32); 4] = [
-    (0.0, -CARD_SIZE.y), // Player 0 (bottom)
-    (CARD_SIZE.y, 0.0),  // Player 1 (right)
-    (0.0, CARD_SIZE.y),  // Player 2 (top)
-    (-CARD_SIZE.y, 0.0), // Player 3 (left)
-];
+/// Seconds a card takes to move between places.
+const TRAVEL_SECS: f32 = 0.3;
+const COLLECTION_DELAY: f32 = 2.;
+/// Seconds a bot "thinks" before playing.
+const BOT_PLAY_DELAY: f32 = 0.4;
 
-/// Distance between the visual representation of the player and the edge of the screen
-const EDGE_MARGIN: f32 = 10.;
+/// Drawing order: hand cards are 1 and up, in hand order. Cards in the same
+/// layer are ordered by [`card_order`], so overlapping ones don't flicker.
+const MARKER_Z: f32 = 20.;
+const TRICK_Z: f32 = 30.;
+const TRAVEL_Z: f32 = 40.;
 
-/// Size of the card sprite.
-const CARD_SIZE: Vec2 = Vec2::new(32., 48.);
+/// How fast hand cards glide to new slots, as the hand shrinks or the screen
+/// changes: the share of the way left they cover each second, roughly.
+const GLIDE_RATE: f32 = 15.;
 
-/// Number of cards per player
-const CARDS_PER_PLAYER: usize = 10;
+/// Returns a depth offset, below 1, that's different for every card.
+fn card_order(card: TressetteCard) -> f32 {
+    (card.suit() as usize * 10 + card.rank() as usize) as f32 * 0.01
+}
 
 pub struct GameLogic;
 
 impl Plugin for GameLogic {
     fn build(&self, app: &mut App) {
         app.add_systems(PostStartup, init_scene)
-            .add_systems(
-                Update,
-                move_to_target.run_if(any_with_component::<MovingTo>),
-            )
+            .add_systems(Update, (place_cards, place_markers))
             .add_systems(Last, despawn_marked.run_if(any_with_component::<ToDespawn>))
             .init_resource::<SetupGameId>()
             .init_resource::<NonPovPlayId>()
@@ -122,12 +120,12 @@ impl Plugin for GameLogic {
             .init_resource::<CollectCardsId>()
             .init_resource::<MarkForDespawnAndContinueId>()
             .init_resource::<CardsBeingCollected>()
-            .insert_resource(GameState::new())
-            .init_state::<Turn>();
+            .insert_resource(GameState::new());
     }
 }
 
-/// System called at the beginning of the game to load assets and spawn players.
+/// System called at the beginning of the game to load assets and set the
+/// table.
 fn init_scene(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -149,89 +147,69 @@ fn init_scene(
     }
     commands.insert_resource(italian_assets);
 
-    // Load card back.
-    let sprite_handle = asset_server.load("cards/card-back1.png");
-    commands.insert_resource(CardBack(sprite_handle));
-
-    // Spawn the players, the POV one at the bottom.
-    for seat in Seat::ALL {
-        commands.spawn((
-            Name::new(seat.to_string()),
-            Transform {
-                translation: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, screen_slot(seat)),
-                ..default()
-            },
-            Player {
-                seat,
-                cards_counter: 0,
-            },
-            Visibility::default(),
-        ));
+    // The other players are shown by a card back with how many cards they
+    // hold.
+    let card_back: Handle<Image> = asset_server.load("cards/card-back1.png");
+    for seat in Seat::ALL.into_iter().filter(|&seat| seat != POV) {
+        let marker = Marker(seat);
+        commands.spawn_scene(bsn! {
+            marker
+            Sprite { image: {card_back.clone()} }
+            Children [
+                MarkerCount
+                Text2d
+                Transform { translation: {Vec3::Z} }
+            ]
+        });
     }
 
-    // Spawn score display
-    commands.spawn((
+    // The top bar, below the room phones keep for the status bar and camera.
+    commands.spawn_scene(bsn! {
         Node {
             position_type: PositionType::Absolute,
-            top: px(10),
-            left: px(10),
-            ..default()
-        },
-        Text::new("Score: 0 - 0"),
-        TextFont::from_font_size(24.0),
-        TextColor(Color::WHITE),
-        ScoreText,
-    ));
+            width: percent(100),
+            height: {px(SAFE_TOP + BAR_HEIGHT)},
+            padding: {UiRect { left: px(12), top: px(SAFE_TOP), ..default() }},
+            align_items: AlignItems::Center,
+        }
+        BackgroundColor({Color::srgba(0., 0., 0., 0.3)})
+        Children [
+            Text("Score: 0 - 0")
+            TextFont { font_size: FontSize::Px(24.) }
+            ScoreText
+        ]
+    });
 
-    // Spawn the restart button, hidden until the game is over.
-    commands
-        .spawn((
-            Button,
+    // The restart button, centred on the table and hidden until the game is
+    // over. What centres it covers the screen, so it lets taps through.
+    let ignore = Pickable::IGNORE;
+    commands.spawn_scene(bsn! {
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            height: percent(100),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+        }
+        ignore
+        Children [
+            Button
             Node {
-                position_type: PositionType::Absolute,
-                top: px(50),
-                left: px(10),
+                padding: {UiRect::all(px(12))},
                 display: Display::None,
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.5, 0.5, 0.5)),
-            children![(
-                Text::new("Restart Game"),
-                TextFont::from_font_size(24.0),
-                TextColor(Color::WHITE),
-            )],
-            RestartButton,
-        ))
-        .observe(restart_game);
+            }
+            BackgroundColor({Color::srgb(0.5, 0.5, 0.5)})
+            RestartButton
+            on(restart_game)
+            Children [
+                Text("Restart Game")
+                TextFont { font_size: FontSize::Px(24.) }
+            ]
+        ]
+    });
 
     // Call system to setup game.
     commands.run_system(setup_game_sys.0);
-}
-
-fn player_position(width: f32, height: f32, slot: usize) -> Vec3 {
-    match slot {
-        0 => Vec3 {
-            x: 0.0,
-            y: -height * 0.5 + EDGE_MARGIN + CARD_SIZE.y * 0.5,
-            z: 0.0,
-        },
-        1 => Vec3 {
-            x: width * 0.5 - EDGE_MARGIN - CARD_SIZE.y * 0.5,
-            y: 0.0,
-            z: 0.0,
-        },
-        2 => Vec3 {
-            x: 0.0,
-            y: height * 0.5 - EDGE_MARGIN - CARD_SIZE.y * 0.5,
-            z: 0.0,
-        },
-        3 => Vec3 {
-            x: -width * 0.5 + EDGE_MARGIN + CARD_SIZE.y * 0.5,
-            y: 0.0,
-            z: 0.0,
-        },
-        _ => panic!("Invalid screen slot"),
-    }
 }
 
 #[derive(Resource)]
@@ -248,8 +226,6 @@ fn setup_game(
     mut commands: Commands,
     mut game: ResMut<GameState>,
     italian_assets: Res<ItalianAssets>,
-    card_back: Res<CardBack>,
-    mut query: Query<(Entity, &mut Player)>,
     non_pov_play_id: Res<NonPovPlayId>,
     enable_pov_id: Res<EnablePovId>,
 ) {
@@ -260,222 +236,196 @@ fn setup_game(
         }
     }
 
-    // Only the POV player's cards are known: the others are dealt face down.
-    let view = game.session.observe(POV);
-    for (entity, mut player) in query.iter_mut() {
-        let seat = player.seat;
-        player.cards_counter = 0;
-        if seat == POV {
-            let mut cards = view.hand().to_vec();
-            cards.sort();
-            distribute_to_pov(
-                &mut commands,
-                &italian_assets,
-                entity,
-                cards,
-                &mut player.cards_counter,
-            );
-        } else {
-            distribute_to_other(
-                &mut commands,
-                &card_back,
-                entity,
-                view.hand_sizes()[seat],
-                &mut player.cards_counter,
-                screen_slot(seat),
-            );
-        }
+    // Only the POV player's cards are known: they come up into the hand from
+    // below the screen, while the markers show how many the others got.
+    for &card in game.session.observe(POV).hand() {
+        let card = Card(card);
+        let face = italian_assets.face(card.0);
+        let spot = Spot::Hand;
+        let travel = Travel::default().starting_at(Place::Marker(Side::Bottom));
+        commands.spawn_scene(bsn! {
+            card
+            spot
+            travel
+            Sprite { image: {face} }
+            // Sprites only get taps and clicks when they're pickable.
+            Pickable
+            on(play_card)
+        });
     }
 
     players_play(&game, &mut commands, &non_pov_play_id, &enable_pov_id);
 }
 
-/// Spawns card entities for the POV player.
-fn distribute_to_pov(
-    commands: &mut Commands,
-    italian_assets: &Res<ItalianAssets>,
-    entity: Entity,
-    cards: Vec<TressetteCard>,
-    card_counter: &mut usize,
-) {
-    let spacing = CARD_SIZE.x * 0.5;
-    let num_cards = CARDS_PER_PLAYER;
-    let total_width = (num_cards - 1) as f32 * spacing;
-    let center_offset = total_width / 2.0;
-
-    let cards_ids: Vec<_> = cards
-        .iter()
-        .map(|card| {
-            let image_handle = italian_assets.face(*card);
-            let id = commands
-                .spawn((
-                    Card(*card),
-                    Sprite {
-                        custom_size: Some(CARD_SIZE),
-                        image: image_handle,
-                        ..default()
-                    },
-                    Transform::from_xyz(
-                        spacing * *card_counter as f32 - center_offset,
-                        0.,
-                        *card_counter as f32,
-                    ),
-                    PovCard,
-                ))
-                .observe(select_play_card)
-                .id();
-            *card_counter += 1;
-            id
-        })
-        .collect();
-    commands.entity(entity).add_children(&cards_ids);
-}
-
-/// Spawns `count` face-down card entities for a non POV player, drawn at
-/// screen `slot`.
-fn distribute_to_other(
-    commands: &mut Commands,
-    card_back: &Res<CardBack>,
-    entity: Entity,
-    count: usize,
-    card_counter: &mut usize,
-    slot: usize,
-) {
-    let spacing = CARD_SIZE.x * 0.5;
-    let num_cards = CARDS_PER_PLAYER;
-    let total_width = (num_cards - 1) as f32 * spacing;
-    let center_offset = total_width / 2.0;
-
-    let cards_ids: Vec<_> = (0..count)
-        .map(|_| {
-            let card_pos = spacing * *card_counter as f32;
-            let (rotation, translation) = match slot {
-                1 => (
-                    Quat::from_rotation_z(PI * 0.5),
-                    Vec3 {
-                        x: 0.,
-                        y: card_pos - center_offset,
-                        z: *card_counter as f32,
-                    },
-                ),
-                2 => (
-                    Quat::IDENTITY,
-                    Vec3 {
-                        x: -card_pos + center_offset,
-                        y: 0.,
-                        z: *card_counter as f32,
-                    },
-                ),
-                3 => (
-                    Quat::from_rotation_z(-PI * 0.5),
-                    Vec3 {
-                        x: 0.,
-                        y: -card_pos + center_offset,
-                        z: *card_counter as f32,
-                    },
-                ),
-                _ => panic!("This should never happen"),
-            };
-            let id = commands
-                .spawn((
-                    FaceDown,
-                    Transform {
-                        translation,
-                        rotation,
-                        ..default()
-                    },
-                    Sprite {
-                        custom_size: Some(CARD_SIZE),
-                        image: card_back.0.clone(),
-                        ..default()
-                    },
-                ))
-                .id();
-            *card_counter += 1;
-            id
-        })
-        .collect();
-    commands.entity(entity).add_children(&cards_ids);
-}
-const CARD_SPEED: f32 = 1000.0;
-const COLLECTION_DELAY: f32 = 2.;
-/// Seconds a bot "thinks" before playing.
-const BOT_PLAY_DELAY: f32 = 0.4;
-const SELECTION_OFFSET: f32 = 20.;
-
-/// This is called when the POV player clicks on one of their cards.
-fn select_play_card(
+/// This is called when the POV player taps or clicks one of their cards: if
+/// it's their turn and the card can be played, it's played.
+fn play_card(
     click: On<PointerClick>,
     mut game: ResMut<GameState>,
-    mut selected_card_query: Query<
-        (Entity, &mut Transform, &Card),
-        (With<Card>, With<Playable>, With<Selected>),
-    >,
+    playable: Query<&Card, With<Playable>>,
+    mut hand: Query<(Entity, &Spot, &mut Sprite)>,
     handle_effect_id: Res<HandleEffectId>,
-    mut unselected_card_query: Query<(&mut Transform, &Card), (With<Playable>, Without<Selected>)>,
     mut commands: Commands,
-    state: Res<State<Turn>>,
 ) {
-    if !matches!(state.into_inner().get(), Turn::PovTurn) {
+    // The game itself says whose turn it is right away, even for a second
+    // tap in the same frame.
+    if game.to_act() != Some(POV) {
         return;
     }
-
-    let clicked_card = click.entity;
-
-    for (selected_entity, mut selected_transform, card) in selected_card_query.iter_mut() {
-        if selected_entity != clicked_card {
-            selected_transform.translation.y -= SELECTION_OFFSET;
-            commands.entity(selected_entity).remove::<Selected>();
-        } else {
-            match game.session.act(POV, Action::Play(card.0)) {
-                Ok(update) => {
-                    game.record(update);
-                    // Move to trick position
-                    let (x, y) = TRICK_POSITIONS[screen_slot(POV)];
-                    commands
-                        .entity(clicked_card)
-                        .remove::<Playable>()
-                        .remove::<Selected>()
-                        .remove::<PovCard>()
-                        .insert(CardInPlay)
-                        .remove_parent_in_place()
-                        .insert(MovingTo {
-                            target: Vec3::new(x, y, 10.0),
-                            speed: CARD_SPEED,
-                            on_arrival: Some(handle_effect_id.0),
-                        });
-                    commands.set_state(Turn::NonPovTurn);
-                }
-                Err(e) => {
-                    warn!("Invalid play: {e}");
+    let clicked = click.entity;
+    let Ok(card) = playable.get(clicked) else {
+        return;
+    };
+    match game.session.act(POV, Action::Play(card.0)) {
+        Ok(update) => {
+            game.record(update);
+            commands
+                .entity(clicked)
+                .insert((Spot::Trick(Side::Bottom), Travel::then(handle_effect_id.0)));
+            // Until it's their turn again, the hand looks neither playable nor
+            // dimmed.
+            for (entity, spot, mut sprite) in &mut hand {
+                if *spot == Spot::Hand {
+                    commands.entity(entity).remove::<Playable>();
+                    sprite.color = Color::WHITE;
                 }
             }
         }
-    }
-    if let Ok((mut transform, _card)) = unselected_card_query.get_mut(clicked_card) {
-        transform.translation.y += SELECTION_OFFSET;
-        commands.entity(clicked_card).insert(Selected);
+        Err(e) => {
+            warn!("Invalid play: {e}");
+        }
     }
 }
 
-fn move_to_target(
-    mut query: Query<(Entity, &mut Transform, &MovingTo)>,
+/// Puts every card where the layout wants its spot, moving it there if it's
+/// travelling. Runs every frame, so cards follow the layout as the window is
+/// resized or the phone rotated.
+fn place_cards(
+    layout: Res<TableLayout>,
     time: Res<Time>,
     mut commands: Commands,
+    mut cards: Query<(
+        Entity,
+        &Card,
+        &Spot,
+        &mut Transform,
+        &mut Sprite,
+        Option<&mut Travel>,
+    )>,
 ) {
-    for (entity, mut transform, moving) in query.iter_mut() {
-        let direction = moving.target - transform.translation;
-        let distance = direction.length();
-        let move_amount = moving.speed * time.delta_secs();
+    // The hand is kept sorted.
+    let mut hand: Vec<_> = cards
+        .iter()
+        .filter(|(_, _, spot, ..)| **spot == Spot::Hand)
+        .map(|(entity, card, ..)| (card.0, entity))
+        .collect();
+    hand.sort();
 
-        if move_amount >= distance {
-            transform.translation = moving.target;
-            commands.entity(entity).remove::<MovingTo>();
-            if let Some(system_id) = moving.on_arrival {
+    for (entity, card, spot, mut transform, mut sprite, travel) in &mut cards {
+        let order = card_order(card.0);
+        let (place, z) = match *spot {
+            Spot::Hand => {
+                let index = hand.iter().position(|&(_, e)| e == entity).unwrap_or(0);
+                let count = hand.len();
+                (Place::Hand { index, count }, 1. + index as f32)
+            }
+            Spot::Trick(side) => (Place::Trick(side), TRICK_Z + order),
+            Spot::Taken(side) => (Place::Marker(side), TRICK_Z + order),
+        };
+        let target = layout.position(place).extend(z);
+        let size = layout.card_size(place);
+
+        let Some(mut travel) = travel else {
+            let current = transform.translation.with_z(z);
+            let (at, size) = if *spot == Spot::Hand && current.distance(target) >= 0.5 {
+                // Glide rather than jump, as when two rows merge into one.
+                let step = 1. - (-GLIDE_RATE * time.delta_secs()).exp();
+                let current_size = sprite.custom_size.unwrap_or(size);
+                (current.lerp(target, step), current_size.lerp(size, step))
+            } else {
+                (target, size)
+            };
+            put(&mut transform, &mut sprite, at, size);
+            continue;
+        };
+        // A start place follows the layout for as long as the card travels, as
+        // the window can still get its real size, or the phone be rotated.
+        let (from, from_size) = match travel.start {
+            Some(start) => (layout.position(start).extend(0.), layout.card_size(start)),
+            None => *travel
+                .from
+                .get_or_insert((transform.translation, sprite.custom_size.unwrap_or(size))),
+        };
+        travel.elapsed += time.delta_secs();
+        let progress = (travel.elapsed / TRAVEL_SECS).min(1.);
+        let eased = progress * progress * (3. - 2. * progress);
+        put(
+            &mut transform,
+            &mut sprite,
+            from.lerp(target, eased).with_z(TRAVEL_Z + order),
+            from_size.lerp(size, eased),
+        );
+        if progress >= 1. {
+            put(&mut transform, &mut sprite, target, size);
+            commands.entity(entity).remove::<Travel>();
+            if let Some(system_id) = travel.on_arrival {
                 commands.run_system(system_id);
             }
+        }
+    }
+}
+
+/// Moves and sizes a sprite, touching it only if that changes anything: a
+/// change makes Bevy redo its transforms and rendering data.
+fn put(transform: &mut Mut<Transform>, sprite: &mut Mut<Sprite>, at: Vec3, size: Vec2) {
+    if transform.translation != at {
+        transform.translation = at;
+    }
+    if sprite.custom_size != Some(size) {
+        sprite.custom_size = Some(size);
+    }
+}
+
+/// Places the other players' markers, showing how many cards they hold.
+fn place_markers(
+    layout: Res<TableLayout>,
+    game: Res<GameState>,
+    mut markers: Query<(
+        &Marker,
+        &Children,
+        &mut Transform,
+        &mut Sprite,
+        &mut Visibility,
+    )>,
+    mut counts: Query<(&mut Text2d, &mut TextFont), With<MarkerCount>>,
+) {
+    let view = game.session.observe(POV);
+    for (marker, children, mut transform, mut sprite, mut visibility) in &mut markers {
+        let place = Place::Marker(side(marker.0));
+        let size = layout.card_size(place);
+        put(
+            &mut transform,
+            &mut sprite,
+            layout.position(place).extend(MARKER_Z),
+            size,
+        );
+
+        let count = view.hand_sizes()[marker.0];
+        visibility.set_if_neq(if count == 0 {
+            Visibility::Hidden
         } else {
-            transform.translation += direction.normalize() * move_amount;
+            Visibility::Inherited
+        });
+        for &child in children {
+            if let Ok((mut text, mut font)) = counts.get_mut(child) {
+                let count = count.to_string();
+                if text.0 != count {
+                    text.0 = count;
+                }
+                // A squeezed window can shrink markers to nothing, but text can't
+                // be sized 0.
+                font.set_if_neq(TextFont::from_font_size((size.y * 0.4).max(1.)));
+            }
         }
     }
 }
@@ -533,8 +483,9 @@ impl FromWorld for CollectCardsId {
     }
 }
 
+/// Sends the cards of the trick to whoever took it.
 fn collect_cards(
-    query: Query<Entity, With<CardInPlay>>,
+    cards: Query<(Entity, &Spot)>,
     game: Res<GameState>,
     mark_for_despawn_and_continue_id: Res<MarkForDespawnAndContinueId>,
     mut cards_being_collected: ResMut<CardsBeingCollected>,
@@ -542,13 +493,14 @@ fn collect_cards(
 ) {
     if let Some(taker) = game.trick_taker() {
         let mut count = 0;
-        for card in query.iter() {
-            commands.entity(card).insert(MovingTo {
-                target: player_position(CANVAS_SIZE.x, CANVAS_SIZE.y, screen_slot(taker)),
-                speed: CARD_SPEED,
-                on_arrival: Some(mark_for_despawn_and_continue_id.0),
-            });
-            count += 1;
+        for (card, spot) in &cards {
+            if matches!(spot, Spot::Trick(_)) {
+                commands.entity(card).insert((
+                    Spot::Taken(side(taker)),
+                    Travel::then(mark_for_despawn_and_continue_id.0),
+                ));
+                count += 1;
+            }
         }
         cards_being_collected.0 = count;
     }
@@ -566,7 +518,7 @@ impl FromWorld for MarkForDespawnAndContinueId {
     }
 }
 fn mark_for_despawn_and_continue(
-    card_query: Query<Entity, (With<CardInPlay>, Without<MovingTo>)>,
+    cards: Query<(Entity, &Spot), Without<Travel>>,
     non_pov_play_id: Res<NonPovPlayId>,
     enable_pov_id: Res<EnablePovId>,
     setup_game_id: Res<SetupGameId>,
@@ -582,9 +534,10 @@ fn mark_for_despawn_and_continue(
 
     // If all cards have finished collecting
     if cards_being_collected.0 == 0 {
-        // Mark all CardInPlay entities for despawn
-        for entity in card_query.iter() {
-            commands.entity(entity).insert(ToDespawn);
+        for (card, spot) in &cards {
+            if matches!(spot, Spot::Taken(_)) {
+                commands.entity(card).insert(ToDespawn);
+            }
         }
 
         // After marking cards for despawn, check what to do next based on the
@@ -613,7 +566,7 @@ fn restart_game(
     setup_game_id: Res<SetupGameId>,
     mut game: ResMut<GameState>,
     mut score_text_query: Query<&mut Text, With<ScoreText>>,
-    card_query: Query<Entity, Or<(With<Card>, With<FaceDown>)>>,
+    card_query: Query<Entity, With<Card>>,
     mut button_query: Query<&mut Node, With<RestartButton>>,
     mut commands: Commands,
 ) {
@@ -645,21 +598,12 @@ fn players_play(
 ) {
     match game.to_act() {
         Some(POV) => commands.run_system(enable_pov_id.0),
-        // The delay also lets freshly dealt cards get their GlobalTransform,
-        // which `non_pov_play` relies on to take them out of the hand.
         Some(_) => commands
             .delayed()
             .secs(BOT_PLAY_DELAY)
             .run_system(non_pov_play_id.0),
         None => {}
     }
-}
-
-#[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
-enum Turn {
-    #[default]
-    PovTurn,
-    NonPovTurn,
 }
 
 #[derive(Resource)]
@@ -674,19 +618,21 @@ impl FromWorld for EnablePovId {
 fn enable_pov(
     game: Res<GameState>,
     mut commands: Commands,
-    mut query: Query<(Entity, &Card, &mut Sprite), With<PovCard>>,
+    mut query: Query<(Entity, &Card, &Spot, &mut Sprite)>,
 ) {
     let playable = game.session.observe(POV).legal_cards();
-    for (entity, card, mut sprite) in query.iter_mut() {
+    for (entity, card, spot, mut sprite) in query.iter_mut() {
+        if *spot != Spot::Hand {
+            continue;
+        }
         if playable.contains(&card.0) {
             commands.entity(entity).insert(Playable);
-            sprite.color = Color::linear_rgb(1., 1., 1.);
+            sprite.color = Color::WHITE;
         } else {
             commands.entity(entity).remove::<Playable>();
             sprite.color = Color::linear_rgb(0.3, 0.3, 0.3);
         }
     }
-    commands.set_state(Turn::PovTurn);
 }
 
 #[derive(Resource)]
@@ -698,14 +644,13 @@ impl FromWorld for NonPovPlayId {
     }
 }
 
-/// One shot system called for non POV players.
+/// One shot system called for non POV players: their card comes out of their
+/// marker into the trick.
 fn non_pov_play(
     mut game: ResMut<GameState>,
     mut commands: Commands,
     handle_effect_id: Res<HandleEffectId>,
     italian_assets: Res<ItalianAssets>,
-    players: Query<(&Player, &Children)>,
-    mut face_down: Query<&mut Sprite, With<FaceDown>>,
 ) {
     let Some(seat) = game.to_act() else {
         return;
@@ -717,35 +662,16 @@ fn non_pov_play(
     match game.session.act(seat, Action::Play(card)) {
         Ok(update) => {
             game.record(update);
-            // The bot's cards are face down and carry no identity: reveal the
-            // last one as the card played, and move it to trick position.
-            let Some(entity) = players
-                .iter()
-                .find(|(player, _)| player.seat == seat)
-                .and_then(|(_, children)| {
-                    children
-                        .iter()
-                        .rev()
-                        .find(|&child| face_down.contains(child))
-                })
-            else {
-                return;
-            };
-            if let Ok(mut sprite) = face_down.get_mut(entity) {
-                sprite.image = italian_assets.face(card);
-            }
-            let (x, y) = TRICK_POSITIONS[screen_slot(seat)];
-            commands
-                .entity(entity)
-                .remove::<FaceDown>()
-                .insert(Card(card))
-                .remove_parent_in_place()
-                .insert(CardInPlay)
-                .insert(MovingTo {
-                    target: Vec3::new(x, y, 10.0),
-                    speed: CARD_SPEED,
-                    on_arrival: Some(handle_effect_id.0),
-                });
+            let face = italian_assets.face(card);
+            let card = Card(card);
+            let spot = Spot::Trick(side(seat));
+            let travel = Travel::then(handle_effect_id.0).starting_at(Place::Marker(side(seat)));
+            commands.spawn_scene(bsn! {
+                card
+                spot
+                travel
+                Sprite { image: {face} }
+            });
         }
         Err(e) => {
             warn!("AI invalid play: {e}");
@@ -754,47 +680,69 @@ fn non_pov_play(
 }
 
 /// A card whose face is shown.
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct Card(pub TressetteCard);
 
-/// A card of a non POV player's hand: shown by its back, and with no
-/// identity until it's played.
-#[derive(Component)]
-struct FaceDown;
+/// Where a card belongs on the table.
+#[derive(Component, Clone, Copy, PartialEq)]
+enum Spot {
+    /// In the POV player's hand.
+    Hand,
+    /// Played in the trick by the player at this side.
+    Trick(Side),
+    /// In a trick taken by the player at this side.
+    Taken(Side),
+}
 
-#[derive(Component, Default)]
-struct Playable;
-
-/// A card in the POV player's hand, which they can click to select and play.
-#[derive(Component, Default)]
-#[require(Pickable)]
-struct PovCard;
-
-#[derive(Component, Default)]
-struct Selected;
-
-#[derive(Component, Default)]
-struct CardInPlay;
-
-#[derive(Component)]
-struct ScoreText;
-
-/// The restart button, shown only once the game is over.
-#[derive(Component)]
-struct RestartButton;
-
-#[derive(Component)]
-struct MovingTo {
-    target: Vec3,
-    speed: f32,
+/// Moves a card to its spot instead of putting it there.
+#[derive(Component, Clone, Default)]
+struct Travel {
+    /// Where the card sets off from, if not where it is.
+    start: Option<Place>,
+    /// Where the card started from, and its size there, once it's moving,
+    /// when it has no `start`.
+    from: Option<(Vec3, Vec2)>,
+    elapsed: f32,
+    /// Run when the card gets there.
     on_arrival: Option<SystemId>,
 }
 
-#[derive(Component)]
-struct Player {
-    seat: Seat,
-    cards_counter: usize,
+impl Travel {
+    fn then(on_arrival: SystemId) -> Self {
+        Self {
+            on_arrival: Some(on_arrival),
+            ..default()
+        }
+    }
+
+    /// Sets off from `start`, wherever the layout has it while the card
+    /// travels: the window may not have its real size yet when the card is
+    /// spawned.
+    fn starting_at(self, start: Place) -> Self {
+        Self {
+            start: Some(start),
+            ..self
+        }
+    }
 }
+
+#[derive(Component, Default, Clone)]
+struct Playable;
+
+/// The card back standing for another player's hand.
+#[derive(Component, Clone)]
+struct Marker(Seat);
+
+/// The number of cards on a marker.
+#[derive(Component, Default, Clone)]
+struct MarkerCount;
+
+#[derive(Component, Default, Clone)]
+struct ScoreText;
+
+/// The restart button, shown only once the game is over.
+#[derive(Component, Default, Clone)]
+struct RestartButton;
 
 /// The card faces, by suit in [`Suit::ALL`] order, then by rank in
 /// [`ItalianRank::ALL`] order.
@@ -807,6 +755,3 @@ impl ItalianAssets {
         self.0[card.suit() as usize][card.rank() as usize - 1].clone()
     }
 }
-
-#[derive(Resource)]
-pub struct CardBack(pub Handle<Image>);
