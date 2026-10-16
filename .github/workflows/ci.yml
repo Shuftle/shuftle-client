@@ -40,7 +40,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo test --locked --config 'profile.dev.package."*".opt-level = 0'
+        run: cargo test --locked --workspace --config 'profile.dev.package."*".opt-level = 0'
 
   test:
     name: Test with stable
@@ -55,7 +55,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo test --locked --config 'profile.dev.package."*".opt-level = 0'
+        run: cargo test --locked --workspace --config 'profile.dev.package."*".opt-level = 0'
 
   fmt:
     name: Rustfmt
@@ -85,7 +85,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Linting
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
   dependencies:
     name: Unused dependencies

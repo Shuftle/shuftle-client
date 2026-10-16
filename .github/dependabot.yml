@@ -19,3 +19,17 @@ updates:
         update-types:
           - minor
           - patch
+  - package-ecosystem: gradle
+    directory: /android
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      # Pinned to what Bevy's android-activity supports; the build checks it.
+      - dependency-name: androidx.games:games-activity
+    groups:
+      gradle-minor-patch:
+        update-types:
+          - minor
+          - patch

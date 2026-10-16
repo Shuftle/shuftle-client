@@ -1,0 +1,20 @@
+[versions]
+# The Android SDK packages the build uses. flake.nix reads these to provide them.
+androidCompileSdk = "36"
+androidBuildTools = "37.0.0"
+androidNdk = "29.0.14206865"
+
+agp = "9.4.1"
+appcompat = "1.8.0"
+# Must match the GameActivity version the `android-activity` crate (used by
+# Bevy) supports, see its README. The build fails when Cargo.lock moves to an
+# `android-activity` other than the one this was checked against.
+gamesActivity = "4.4.0"
+androidActivity = "0.6.1"
+
+[libraries]
+appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+games-activity = { group = "androidx.games", name = "games-activity", version.ref = "gamesActivity" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }

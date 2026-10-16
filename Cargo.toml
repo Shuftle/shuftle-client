@@ -10,6 +10,13 @@ license = "AGPL-3.0-only"
 readme = "README.md"
 repository = "https://github.com/shuftle/shuftle-client"
 
+[workspace]
+members = ["mobile"]
+
+[workspace.dependencies]
+# Shared so a Bevy upgrade is a single change for every platform.
+bevy = { version = "0.20", default-features = false }
+
 [lib]
 path = "src/lib.rs"
 
@@ -18,7 +25,7 @@ name = "shuftle"
 path = "src/main.rs"
 
 [dependencies]
-bevy = { version = "0.20", default-features = false, features = ["2d", "ui"] }
+bevy = { workspace = true, features = ["2d", "ui"] }
 rand = "0.10"
 shuftlib = "0.5"
 

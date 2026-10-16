@@ -165,6 +165,7 @@ dependencies = [
  "ndk-context",
  "ndk-sys",
  "num_enum",
+ "simd_cesu8",
  "thiserror 2.0.21",
 ]
 
@@ -4765,6 +4766,14 @@ dependencies = [
  "getrandom 0.4.3",
  "rand",
  "shuftlib",
+]
+
+[[package]]
+name = "shuftle-mobile"
+version = "0.0.0"
+dependencies = [
+ "bevy",
+ "shuftle-client-core",
 ]
 
 [[package]]
