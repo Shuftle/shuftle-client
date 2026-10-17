@@ -25,7 +25,29 @@ name = "shuftle"
 path = "src/main.rs"
 
 [dependencies]
-bevy = { workspace = true, features = ["2d", "ui"] }
+# Only what the game uses, rather than the 2d and ui bundles, which also bring
+# gamepads, gizmos, animation and post-processing.
+bevy = { workspace = true, features = [
+    "std",
+    "multi_threaded",
+    "async_executor",
+    "bevy_log",
+    "bevy_asset",
+    "png",
+    "bevy_winit",
+    "x11",
+    "wayland",
+    "webgl2",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_sprite_render",
+    "bevy_ui_render",
+    "bevy_ui_widgets",
+    "default_font",
+    "scene",
+    "sprite_picking",
+    "ui_picking",
+] }
 rand = "0.10"
 shuftlib = "0.5"
 
