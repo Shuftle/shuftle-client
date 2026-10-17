@@ -1,7 +1,9 @@
 use bevy::{
     ecs::{schedule::common_conditions::any_with_component, system::SystemId},
     prelude::*,
+    time::DelayedCommandQueue,
     ui_widgets::{Activate, Button},
+    window::RequestRedraw,
 };
 use shuftlib::{
     cards::italian::{ItalianRank, Suit},
@@ -117,10 +119,6 @@ const MARKER_Z: f32 = 20.;
 const TRICK_Z: f32 = 30.;
 const TRAVEL_Z: f32 = 40.;
 
-/// How fast hand cards glide to new slots, as the hand shrinks or the screen
-/// changes: the share of the way left they cover each second, roughly.
-const GLIDE_RATE: f32 = 15.;
-
 /// Returns a depth offset, below 1, that's different for every card.
 fn card_order(card: TressetteCard) -> f32 {
     (card.suit() as usize * 10 + card.rank() as usize) as f32 * 0.01
@@ -140,7 +138,21 @@ impl Plugin for GameLogic {
                     show_score.run_if(resource_changed::<ShownScore>),
                 ),
             )
-            .add_systems(Last, despawn_marked.run_if(any_with_component::<ToDespawn>))
+            .add_systems(
+                Last,
+                (
+                    despawn_marked.run_if(any_with_component::<ToDespawn>),
+                    // Frames are only drawn on input, or while something here
+                    // needs them: what moves, and what only gets on while
+                    // frames are drawn.
+                    redraw.run_if(
+                        any_with_component::<Travel>
+                            .or_else(any_with_component::<Pulse>)
+                            .or_else(any_with_component::<DelayedCommandQueue>)
+                            .or_else(images_loading),
+                    ),
+                ),
+            )
             .init_resource::<SetupGameId>()
             .init_resource::<NonPovPlayId>()
             .init_resource::<EnablePovId>()
@@ -397,16 +409,13 @@ fn place_cards(
         let size = layout.card_size(place);
 
         let Some(mut travel) = travel else {
-            let current = transform.translation.with_z(z);
-            let (at, size) = if *spot == Spot::Hand && current.distance(target) >= 0.5 {
-                // Glide rather than jump, as when two rows merge into one.
-                let step = 1. - (-GLIDE_RATE * time.delta_secs()).exp();
-                let current_size = sprite.custom_size.unwrap_or(size);
-                (current.lerp(target, step), current_size.lerp(size, step))
+            if *spot == Spot::Hand && transform.translation.with_z(z).distance(target) >= 0.5 {
+                // Move rather than jump to a new slot, as when two rows merge
+                // into one.
+                commands.entity(entity).insert(Travel::default());
             } else {
-                (target, size)
-            };
-            put(&mut transform, &mut sprite, at, size);
+                put(&mut transform, &mut sprite, target, size);
+            }
             continue;
         };
         // A start place follows the layout for as long as the card travels, as
@@ -457,6 +466,7 @@ fn show_turn(
     markers: Query<(&Marker, &Children)>,
     mut glows: Query<(&mut Sprite, &mut Visibility), With<TurnGlow>>,
     mut note: Single<&mut Text, With<TurnText>>,
+    mut commands: Commands,
 ) {
     let to_act = game.to_act();
     for (marker, children) in &markers {
@@ -465,12 +475,18 @@ fn show_turn(
                 continue;
             };
             if to_act != Some(marker.0) {
-                visibility.set_if_neq(Visibility::Hidden);
+                if visibility.set_if_neq(Visibility::Hidden) {
+                    commands.entity(child).remove::<Pulse>();
+                }
                 continue;
             }
-            visibility.set_if_neq(Visibility::Inherited);
-            let size = layout.card_size(Place::Marker(side(marker.0)));
-            sprite.custom_size = Some(size * GLOW_SCALE);
+            if visibility.set_if_neq(Visibility::Inherited) {
+                commands.entity(child).insert(Pulse);
+            }
+            let size = layout.card_size(Place::Marker(side(marker.0))) * GLOW_SCALE;
+            if sprite.custom_size != Some(size) {
+                sprite.custom_size = Some(size);
+            }
             let pulse = 0.55 + 0.3 * (time.elapsed_secs() * std::f32::consts::TAU).sin();
             sprite.color = TURN_COLOR.with_alpha(pulse);
         }
@@ -839,6 +855,10 @@ struct MarkerCount;
 #[derive(Component, Default, Clone)]
 struct TurnGlow;
 
+/// On a turn glow while it's shown, and pulses.
+#[derive(Component)]
+struct Pulse;
+
 /// Says in the top bar when it's the POV player's turn.
 #[derive(Component, Default, Clone)]
 struct TurnText;
@@ -879,4 +899,18 @@ impl ItalianAssets {
     fn face(&self, card: TressetteCard) -> Handle<Image> {
         self.0[card.suit() as usize][card.rank() as usize - 1].clone()
     }
+}
+
+/// Asks for another frame.
+fn redraw(mut redraw: MessageWriter<RequestRedraw>) {
+    redraw.write(RequestRedraw);
+}
+
+/// Returns whether a sprite's image is still loading.
+fn images_loading(sprites: Query<&Sprite>, asset_server: Res<AssetServer>) -> bool {
+    sprites.iter().any(|sprite| {
+        asset_server
+            .get_load_state(&sprite.image)
+            .is_some_and(|state| state.is_loading())
+    })
 }
