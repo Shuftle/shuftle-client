@@ -8,7 +8,7 @@
 use bevy::{prelude::*, window::PrimaryWindow};
 
 /// Width over height of the card images.
-const CARD_ASPECT: f32 = 2. / 3.;
+const CARD_ASPECT: f32 = 169.075 / 244.64;
 
 /// Height of the name under a marker, as a share of the marker's, and the space
 /// between them.

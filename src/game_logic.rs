@@ -90,14 +90,16 @@ fn side(seat: Seat) -> Side {
     }
 }
 
-/// Returns the letter the card assets use for `suit`: they're named after
-/// the French suits.
-fn asset_letter(suit: Suit) -> &'static str {
+/// The deck the cards are drawn from.
+const DECK: &str = "cards/italian/paris/svg-cards";
+
+/// Returns the name the deck's files use for `suit`.
+fn suit_name(suit: Suit) -> &'static str {
     match suit {
-        Suit::Cups => "H",
-        Suit::Coins => "D",
-        Suit::Clubs => "C",
-        Suit::Swords => "S",
+        Suit::Cups => "cups",
+        Suit::Coins => "coins",
+        Suit::Clubs => "clubs",
+        Suit::Swords => "swords",
     }
 }
 
@@ -111,6 +113,12 @@ const BOT_PLAY_DELAY: f32 = 0.7;
 const TURN_COLOR: Color = Color::srgb(1., 0.84, 0.45);
 /// Size of a turn glow, relative to its marker.
 const GLOW_SCALE: f32 = 1.7;
+/// How opaque the glow around the cards the POV player can play is, in the turn
+/// colour, and how far it reaches past their edges.
+const PLAYABLE_ALPHA: f32 = 0.85;
+const PLAYABLE_REACH: f32 = 6.;
+/// Depth of that glow, below every card in the hand.
+const PLAYABLE_GLOW_Z: f32 = 0.5;
 /// Colours of the POV player's team, and of the other one.
 const US_COLOR: Color = Color::srgb(0.55, 0.78, 1.);
 /// How opaque the glow around the cards the POV player can play is, in the turn
@@ -161,6 +169,12 @@ impl Plugin for GameLogic {
                     ),
                 ),
             )
+            .add_systems(
+                PostUpdate,
+                fit_playable_glows.before(TransformSystems::Propagate),
+            )
+            .add_observer(glow_playable)
+            .add_observer(unglow_playable)
             .init_resource::<SetupGameId>()
             .init_resource::<NonPovPlayId>()
             .add_systems(
@@ -192,11 +206,8 @@ fn init_scene(
     for suit in Suit::ALL {
         let mut cards_in_suit = Vec::with_capacity(10);
         for rank in ItalianRank::ALL {
-            let sprite_handle = asset_server.load(format!(
-                "cards/italian/card-{}-{}.png",
-                asset_letter(suit),
-                rank as u8
-            ));
+            let sprite_handle =
+                asset_server.load(format!("{DECK}/{}-{}.png", suit_name(suit), rank as u8));
             cards_in_suit.push(sprite_handle);
         }
         italian_assets.0.push(cards_in_suit);
@@ -205,7 +216,7 @@ fn init_scene(
 
     // The other players are shown by a card back with how many cards they
     // hold, named in their team's colour and glowing when it's their turn.
-    let card_back: Handle<Image> = asset_server.load("cards/card-back1.png");
+    let card_back: Handle<Image> = asset_server.load(format!("{DECK}/back.png"));
     for seat in Seat::ALL.into_iter().filter(|&seat| seat != POV) {
         let marker = Marker(seat);
         let name = seat.to_string();
@@ -481,6 +492,7 @@ fn show_turn(
     mut glows: Query<(&mut Sprite, &mut Visibility), With<TurnGlow>>,
     playable: Query<(), With<Playable>>,
     mut note: Single<&mut Text, With<TurnText>>,
+    playable: Query<(), With<Playable>>,
     mut commands: Commands,
 ) {
     let to_act = game.to_act();
@@ -922,6 +934,68 @@ fn fit_playable_glows(
     }
 }
 
+
+/// The glow behind a card that can be played.
+#[derive(Component)]
+struct PlayableGlow;
+
+/// Puts a glow behind a card once it can be played.
+fn glow_playable(add: On<Add<Playable>>, glow: Res<Glow>, mut commands: Commands) {
+    commands.entity(add.entity).with_child((
+        PlayableGlow,
+        Sprite {
+            image: glow.0.clone(),
+            color: TURN_COLOR.with_alpha(PLAYABLE_ALPHA),
+            // Sliced, so the glow fades out over the same width around any
+            // card, starting at its edges.
+            image_mode: SpriteImageMode::Sliced(TextureSlicer {
+                border: BorderRect::all(GLOW_FADE),
+                max_corner_scale: PLAYABLE_REACH / GLOW_FADE,
+                ..default()
+            }),
+            ..default()
+        },
+    ));
+}
+
+/// Takes the glow away once a card can't be played anymore.
+fn unglow_playable(
+    remove: On<Remove<Playable>>,
+    children: Query<&Children>,
+    glows: Query<(), With<PlayableGlow>>,
+    mut commands: Commands,
+) {
+    for child in children.iter_descendants(remove.entity) {
+        if glows.contains(child) {
+            // The card may be on its way out, with its glow.
+            commands.entity(child).try_despawn();
+        }
+    }
+}
+
+/// Sizes the glows of playable cards to their cards, and keeps them below
+/// every card in the hand.
+fn fit_playable_glows(
+    cards: Query<(&Sprite, &Transform), Without<PlayableGlow>>,
+    mut glows: Query<(&ChildOf, &mut Sprite, &mut Transform), With<PlayableGlow>>,
+) {
+    for (child_of, mut sprite, mut transform) in &mut glows {
+        let Ok((card, card_transform)) = cards.get(child_of.parent()) else {
+            continue;
+        };
+        let Some(card_size) = card.custom_size else {
+            continue;
+        };
+        let size = card_size + Vec2::splat(PLAYABLE_REACH * 2.);
+        if sprite.custom_size != Some(size) {
+            sprite.custom_size = Some(size);
+        }
+        let z = PLAYABLE_GLOW_Z - card_transform.translation.z;
+        if transform.translation.z != z {
+            transform.translation.z = z;
+        }
+    }
+}
 
 /// The card back standing for another player's hand.
 #[derive(Component, Clone)]
