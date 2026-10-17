@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/Shuftle/shuftle-client/compare/v0.2.2...v0.3.0) - 2026-10-17
+
+### Added
+
+- table polish, optimizations ([#26](https://github.com/Shuftle/shuftle-client/pull/26))
+- table look ([#25](https://github.com/Shuftle/shuftle-client/pull/25))
+
+### Other
+
+- Table layout ([#24](https://github.com/Shuftle/shuftle-client/pull/24))
+- Android builds ([#23](https://github.com/Shuftle/shuftle-client/pull/23))
+- Engine port ([#21](https://github.com/Shuftle/shuftle-client/pull/21))
+- *(deps)* bump actions/checkout from 6 to 7 ([#19](https://github.com/Shuftle/shuftle-client/pull/19))
+
 ## [0.2.2](https://github.com/Shuftle/shuftle-client/compare/v0.2.1...v0.2.2) - 2026-03-12
 
 ### Added
