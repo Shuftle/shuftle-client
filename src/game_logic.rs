@@ -1,7 +1,11 @@
 use bevy::{
     ecs::{schedule::common_conditions::any_with_component, system::SystemId},
     prelude::*,
+    sprite::{BorderRect, TextureSlicer},
+    time::DelayedCommandQueue,
+    transform::TransformSystems,
     ui_widgets::{Activate, Button},
+    window::RequestRedraw,
 };
 use shuftlib::{
     cards::italian::{ItalianRank, Suit},
@@ -11,7 +15,7 @@ use shuftlib::{
 
 use crate::{
     layout::{BAR_HEIGHT, Place, SAFE_TOP, Side, TableLayout},
-    table::Glow,
+    table::{GLOW_FADE, Glow},
 };
 
 /// The seat of the player in front of the screen.
@@ -86,14 +90,16 @@ fn side(seat: Seat) -> Side {
     }
 }
 
-/// Returns the letter the card assets use for `suit`: they're named after
-/// the French suits.
-fn asset_letter(suit: Suit) -> &'static str {
+/// The deck the cards are drawn from.
+const DECK: &str = "cards/italian/paris/svg-cards";
+
+/// Returns the name the deck's files use for `suit`.
+fn suit_name(suit: Suit) -> &'static str {
     match suit {
-        Suit::Cups => "H",
-        Suit::Coins => "D",
-        Suit::Clubs => "C",
-        Suit::Swords => "S",
+        Suit::Cups => "cups",
+        Suit::Coins => "coins",
+        Suit::Clubs => "clubs",
+        Suit::Swords => "swords",
     }
 }
 
@@ -107,6 +113,12 @@ const BOT_PLAY_DELAY: f32 = 0.7;
 const TURN_COLOR: Color = Color::srgb(1., 0.84, 0.45);
 /// Size of a turn glow, relative to its marker.
 const GLOW_SCALE: f32 = 1.7;
+/// How opaque the glow around the cards the POV player can play is, in the turn
+/// colour, and how far it reaches past their edges.
+const PLAYABLE_ALPHA: f32 = 0.85;
+const PLAYABLE_REACH: f32 = 6.;
+/// Depth of that glow, below every card in the hand.
+const PLAYABLE_GLOW_Z: f32 = 0.5;
 /// Colours of the POV player's team, and of the other one.
 const US_COLOR: Color = Color::srgb(0.55, 0.78, 1.);
 const THEM_COLOR: Color = Color::srgb(1., 0.6, 0.55);
@@ -116,10 +128,6 @@ const THEM_COLOR: Color = Color::srgb(1., 0.6, 0.55);
 const MARKER_Z: f32 = 20.;
 const TRICK_Z: f32 = 30.;
 const TRAVEL_Z: f32 = 40.;
-
-/// How fast hand cards glide to new slots, as the hand shrinks or the screen
-/// changes: the share of the way left they cover each second, roughly.
-const GLIDE_RATE: f32 = 15.;
 
 /// Returns a depth offset, below 1, that's different for every card.
 fn card_order(card: TressetteCard) -> f32 {
@@ -140,7 +148,27 @@ impl Plugin for GameLogic {
                     show_score.run_if(resource_changed::<ShownScore>),
                 ),
             )
-            .add_systems(Last, despawn_marked.run_if(any_with_component::<ToDespawn>))
+            .add_systems(
+                Last,
+                (
+                    despawn_marked.run_if(any_with_component::<ToDespawn>),
+                    // Frames are only drawn on input, or while something here
+                    // needs them: what moves, and what only gets on while
+                    // frames are drawn.
+                    redraw.run_if(
+                        any_with_component::<Travel>
+                            .or_else(any_with_component::<Pulse>)
+                            .or_else(any_with_component::<DelayedCommandQueue>)
+                            .or_else(images_loading),
+                    ),
+                ),
+            )
+            .add_systems(
+                PostUpdate,
+                fit_playable_glows.before(TransformSystems::Propagate),
+            )
+            .add_observer(glow_playable)
+            .add_observer(unglow_playable)
             .init_resource::<SetupGameId>()
             .init_resource::<NonPovPlayId>()
             .init_resource::<EnablePovId>()
@@ -166,11 +194,8 @@ fn init_scene(
     for suit in Suit::ALL {
         let mut cards_in_suit = Vec::with_capacity(10);
         for rank in ItalianRank::ALL {
-            let sprite_handle = asset_server.load(format!(
-                "cards/italian/card-{}-{}.png",
-                asset_letter(suit),
-                rank as u8
-            ));
+            let sprite_handle =
+                asset_server.load(format!("{DECK}/{}-{}.png", suit_name(suit), rank as u8));
             cards_in_suit.push(sprite_handle);
         }
         italian_assets.0.push(cards_in_suit);
@@ -179,7 +204,7 @@ fn init_scene(
 
     // The other players are shown by a card back with how many cards they
     // hold, named in their team's colour and glowing when it's their turn.
-    let card_back: Handle<Image> = asset_server.load("cards/card-back1.png");
+    let card_back: Handle<Image> = asset_server.load(format!("{DECK}/back.png"));
     for seat in Seat::ALL.into_iter().filter(|&seat| seat != POV) {
         let marker = Marker(seat);
         let name = seat.to_string();
@@ -397,16 +422,13 @@ fn place_cards(
         let size = layout.card_size(place);
 
         let Some(mut travel) = travel else {
-            let current = transform.translation.with_z(z);
-            let (at, size) = if *spot == Spot::Hand && current.distance(target) >= 0.5 {
-                // Glide rather than jump, as when two rows merge into one.
-                let step = 1. - (-GLIDE_RATE * time.delta_secs()).exp();
-                let current_size = sprite.custom_size.unwrap_or(size);
-                (current.lerp(target, step), current_size.lerp(size, step))
+            if *spot == Spot::Hand && transform.translation.with_z(z).distance(target) >= 0.5 {
+                // Move rather than jump to a new slot, as when two rows merge
+                // into one.
+                commands.entity(entity).insert(Travel::default());
             } else {
-                (target, size)
-            };
-            put(&mut transform, &mut sprite, at, size);
+                put(&mut transform, &mut sprite, target, size);
+            }
             continue;
         };
         // A start place follows the layout for as long as the card travels, as
@@ -457,6 +479,8 @@ fn show_turn(
     markers: Query<(&Marker, &Children)>,
     mut glows: Query<(&mut Sprite, &mut Visibility), With<TurnGlow>>,
     mut note: Single<&mut Text, With<TurnText>>,
+    playable: Query<(), With<Playable>>,
+    mut commands: Commands,
 ) {
     let to_act = game.to_act();
     for (marker, children) in &markers {
@@ -465,18 +489,27 @@ fn show_turn(
                 continue;
             };
             if to_act != Some(marker.0) {
-                visibility.set_if_neq(Visibility::Hidden);
+                if visibility.set_if_neq(Visibility::Hidden) {
+                    commands.entity(child).remove::<Pulse>();
+                }
                 continue;
             }
-            visibility.set_if_neq(Visibility::Inherited);
-            let size = layout.card_size(Place::Marker(side(marker.0)));
-            sprite.custom_size = Some(size * GLOW_SCALE);
+            if visibility.set_if_neq(Visibility::Inherited) {
+                commands.entity(child).insert(Pulse);
+            }
+            let size = layout.card_size(Place::Marker(side(marker.0))) * GLOW_SCALE;
+            if sprite.custom_size != Some(size) {
+                sprite.custom_size = Some(size);
+            }
             let pulse = 0.55 + 0.3 * (time.elapsed_secs() * std::f32::consts::TAU).sin();
             sprite.color = TURN_COLOR.with_alpha(pulse);
         }
     }
 
-    let wanted = if to_act == Some(POV) { "Your turn" } else { "" };
+    // Only once the POV player's cards can be played: the game says it's their
+    // turn already while the last card still travels or the trick is
+    // collected.
+    let wanted = if playable.is_empty() { "" } else { "Your turn" };
     if note.0 != wanted {
         note.0 = wanted.into();
     }
@@ -512,14 +545,9 @@ fn place_markers(
                 font.set_if_neq(TextFont::from_font_size((size.y * 0.4).max(1.)));
             }
             if let Ok((mut name_transform, mut font)) = names.get_mut(child) {
-                let font_size = (size.y * 0.22).max(1.);
-                font.set_if_neq(TextFont::from_font_size(font_size));
-                // Just under the card back.
-                name_transform.set_if_neq(Transform::from_xyz(
-                    0.,
-                    -(size.y + font_size) * 0.5 - 2.,
-                    1.,
-                ));
+                let (font_size, below) = layout.marker_label();
+                font.set_if_neq(TextFont::from_font_size(font_size.max(1.)));
+                name_transform.set_if_neq(Transform::from_xyz(0., below, 1.));
             }
         }
     }
@@ -832,6 +860,68 @@ impl Travel {
 #[derive(Component, Default, Clone)]
 struct Playable;
 
+/// The glow behind a card that can be played.
+#[derive(Component)]
+struct PlayableGlow;
+
+/// Puts a glow behind a card once it can be played.
+fn glow_playable(add: On<Add<Playable>>, glow: Res<Glow>, mut commands: Commands) {
+    commands.entity(add.entity).with_child((
+        PlayableGlow,
+        Sprite {
+            image: glow.0.clone(),
+            color: TURN_COLOR.with_alpha(PLAYABLE_ALPHA),
+            // Sliced, so the glow fades out over the same width around any
+            // card, starting at its edges.
+            image_mode: SpriteImageMode::Sliced(TextureSlicer {
+                border: BorderRect::all(GLOW_FADE),
+                max_corner_scale: PLAYABLE_REACH / GLOW_FADE,
+                ..default()
+            }),
+            ..default()
+        },
+    ));
+}
+
+/// Takes the glow away once a card can't be played anymore.
+fn unglow_playable(
+    remove: On<Remove<Playable>>,
+    children: Query<&Children>,
+    glows: Query<(), With<PlayableGlow>>,
+    mut commands: Commands,
+) {
+    for child in children.iter_descendants(remove.entity) {
+        if glows.contains(child) {
+            // The card may be on its way out, with its glow.
+            commands.entity(child).try_despawn();
+        }
+    }
+}
+
+/// Sizes the glows of playable cards to their cards, and keeps them below
+/// every card in the hand.
+fn fit_playable_glows(
+    cards: Query<(&Sprite, &Transform), Without<PlayableGlow>>,
+    mut glows: Query<(&ChildOf, &mut Sprite, &mut Transform), With<PlayableGlow>>,
+) {
+    for (child_of, mut sprite, mut transform) in &mut glows {
+        let Ok((card, card_transform)) = cards.get(child_of.parent()) else {
+            continue;
+        };
+        let Some(card_size) = card.custom_size else {
+            continue;
+        };
+        let size = card_size + Vec2::splat(PLAYABLE_REACH * 2.);
+        if sprite.custom_size != Some(size) {
+            sprite.custom_size = Some(size);
+        }
+        let z = PLAYABLE_GLOW_Z - card_transform.translation.z;
+        if transform.translation.z != z {
+            transform.translation.z = z;
+        }
+    }
+}
+
 /// The card back standing for another player's hand.
 #[derive(Component, Clone)]
 struct Marker(Seat);
@@ -843,6 +933,10 @@ struct MarkerCount;
 /// The halo around a marker, shown while that player is to play.
 #[derive(Component, Default, Clone)]
 struct TurnGlow;
+
+/// On a turn glow while it's shown, and pulses.
+#[derive(Component)]
+struct Pulse;
 
 /// Says in the top bar when it's the POV player's turn.
 #[derive(Component, Default, Clone)]
@@ -884,4 +978,18 @@ impl ItalianAssets {
     fn face(&self, card: TressetteCard) -> Handle<Image> {
         self.0[card.suit() as usize][card.rank() as usize - 1].clone()
     }
+}
+
+/// Asks for another frame.
+fn redraw(mut redraw: MessageWriter<RequestRedraw>) {
+    redraw.write(RequestRedraw);
+}
+
+/// Returns whether a sprite's image is still loading.
+fn images_loading(sprites: Query<&Sprite>, asset_server: Res<AssetServer>) -> bool {
+    sprites.iter().any(|sprite| {
+        asset_server
+            .get_load_state(&sprite.image)
+            .is_some_and(|state| state.is_loading())
+    })
 }

@@ -3,6 +3,7 @@ git_only = true
 semver_check = false
 release_always = false
 publish = false
+features_always_increment_minor = true
 # Explicit: release.yml triggers on these tags.
 git_tag_name = "v{{ version }}"
 

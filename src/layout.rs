@@ -8,7 +8,12 @@
 use bevy::{prelude::*, window::PrimaryWindow};
 
 /// Width over height of the card images.
-const CARD_ASPECT: f32 = 2. / 3.;
+const CARD_ASPECT: f32 = 169.075 / 244.64;
+
+/// Height of the name under a marker, as a share of the marker's, and the space
+/// between them.
+const LABEL_SHARE: f32 = 0.22;
+const LABEL_SPACE: f32 = 2.;
 
 /// Room at the top that phones keep for the status bar and the selfie camera,
 /// which the game draws under but can't put anything to see or tap in. It's
@@ -116,7 +121,9 @@ impl TableLayout {
         // The trick fills what the markers leave, in a diamond three cards wide
         // and two tall, but never with cards bigger than the hand's.
         let trick_width = table_size.x - 2. * (marker_card.x + gap);
-        let trick_height = table_size.y - (marker_card.y + gap);
+        // The top player's marker and name take the top of the table.
+        let top_marker = marker_card.y * (1. + LABEL_SHARE) + LABEL_SPACE + gap;
+        let trick_height = table_size.y - top_marker;
         let trick_card = card_of_width(
             ((trick_width - 2. * gap) / 3.)
                 .min((trick_height - gap) * 0.5 * CARD_ASPECT)
@@ -124,7 +131,7 @@ impl TableLayout {
         );
         let trick_center = Vec2::new(
             (table_min.x + table_max.x) * 0.5,
-            (table_min.y + table_max.y - marker_card.y - gap) * 0.5,
+            (table_min.y + table_max.y - top_marker) * 0.5,
         );
 
         Self {
@@ -167,6 +174,13 @@ impl TableLayout {
                 }
             }
         }
+    }
+
+    /// Returns the size of the name under a marker, and how far below the
+    /// marker's centre the name's centre is.
+    pub fn marker_label(&self) -> (f32, f32) {
+        let size = self.marker_card.y * LABEL_SHARE;
+        (size, -(self.marker_card.y + size) * 0.5 - LABEL_SPACE)
     }
 
     /// Returns the size of a card at `place`.
@@ -390,6 +404,34 @@ mod tests {
                     let a = rect(&layout, Place::Trick(a)).inflate(0.5);
                     let b = rect(&layout, Place::Trick(b));
                     assert!(!overlap(a, b), "{a:?} touches {b:?} on a {size} screen");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn marker_names_stay_clear() {
+        for layout in layouts() {
+            let size = layout.size;
+            let (font_size, below) = layout.marker_label();
+            let mut others: Vec<_> = Side::ALL.map(Place::Trick).into();
+            others.extend(hand(10));
+            for side in [Side::Right, Side::Top, Side::Left] {
+                let marker = rect(&layout, Place::Marker(side));
+                // Names are about as wide as the marker: allow some more.
+                let name = Rect::from_center_size(
+                    marker.center() + Vec2::Y * below,
+                    Vec2::new(marker.width() * 1.2, font_size),
+                );
+                assert!(
+                    inside(screen(&layout), name),
+                    "{side:?} name off a {size} screen"
+                );
+                for &other in &others {
+                    assert!(
+                        !overlap(name, rect(&layout, other)),
+                        "{side:?} name overlaps {other:?} on a {size} screen"
+                    );
                 }
             }
         }
