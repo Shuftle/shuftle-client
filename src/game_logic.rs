@@ -512,14 +512,9 @@ fn place_markers(
                 font.set_if_neq(TextFont::from_font_size((size.y * 0.4).max(1.)));
             }
             if let Ok((mut name_transform, mut font)) = names.get_mut(child) {
-                let font_size = (size.y * 0.22).max(1.);
-                font.set_if_neq(TextFont::from_font_size(font_size));
-                // Just under the card back.
-                name_transform.set_if_neq(Transform::from_xyz(
-                    0.,
-                    -(size.y + font_size) * 0.5 - 2.,
-                    1.,
-                ));
+                let (font_size, below) = layout.marker_label();
+                font.set_if_neq(TextFont::from_font_size(font_size.max(1.)));
+                name_transform.set_if_neq(Transform::from_xyz(0., below, 1.));
             }
         }
     }
