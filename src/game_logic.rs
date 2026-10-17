@@ -1,7 +1,9 @@
 use bevy::{
     ecs::{schedule::common_conditions::any_with_component, system::SystemId},
     prelude::*,
+    sprite::{BorderRect, TextureSlicer},
     time::DelayedCommandQueue,
+    transform::TransformSystems,
     ui_widgets::{Activate, Button},
     window::RequestRedraw,
 };
@@ -13,7 +15,7 @@ use shuftlib::{
 
 use crate::{
     layout::{BAR_HEIGHT, Place, SAFE_TOP, Side, TableLayout},
-    table::Glow,
+    table::{GLOW_FADE, Glow},
 };
 
 /// The seat of the player in front of the screen.
@@ -111,6 +113,12 @@ const TURN_COLOR: Color = Color::srgb(1., 0.84, 0.45);
 const GLOW_SCALE: f32 = 1.7;
 /// Colours of the POV player's team, and of the other one.
 const US_COLOR: Color = Color::srgb(0.55, 0.78, 1.);
+/// How opaque the glow around the cards the POV player can play is, in the turn
+/// colour, and how far it reaches past their edges.
+const PLAYABLE_ALPHA: f32 = 0.85;
+const PLAYABLE_REACH: f32 = 6.;
+/// Depth of that glow, below every card in the hand.
+const PLAYABLE_GLOW_Z: f32 = 0.5;
 const THEM_COLOR: Color = Color::srgb(1., 0.6, 0.55);
 
 /// Drawing order: hand cards are 1 and up, in hand order. Cards in the same
@@ -155,6 +163,12 @@ impl Plugin for GameLogic {
             )
             .init_resource::<SetupGameId>()
             .init_resource::<NonPovPlayId>()
+            .add_systems(
+                PostUpdate,
+                fit_playable_glows.before(TransformSystems::Propagate),
+            )
+            .add_observer(glow_playable)
+            .add_observer(unglow_playable)
             .init_resource::<EnablePovId>()
             .init_resource::<HandleEffectId>()
             .init_resource::<CollectCardsId>()
@@ -465,6 +479,7 @@ fn show_turn(
     time: Res<Time>,
     markers: Query<(&Marker, &Children)>,
     mut glows: Query<(&mut Sprite, &mut Visibility), With<TurnGlow>>,
+    playable: Query<(), With<Playable>>,
     mut note: Single<&mut Text, With<TurnText>>,
     mut commands: Commands,
 ) {
@@ -492,7 +507,10 @@ fn show_turn(
         }
     }
 
-    let wanted = if to_act == Some(POV) { "Your turn" } else { "" };
+    // Only once the POV player's cards can be played: the game says it's their
+    // turn already while the last card still travels or the trick is
+    // collected.
+    let wanted = if playable.is_empty() { "" } else { "Your turn" };
     if note.0 != wanted {
         note.0 = wanted.into();
     }
@@ -842,6 +860,68 @@ impl Travel {
 
 #[derive(Component, Default, Clone)]
 struct Playable;
+/// The glow behind a card that can be played.
+#[derive(Component)]
+struct PlayableGlow;
+
+/// Puts a glow behind a card once it can be played.
+fn glow_playable(add: On<Add<Playable>>, glow: Res<Glow>, mut commands: Commands) {
+    commands.entity(add.entity).with_child((
+        PlayableGlow,
+        Sprite {
+            image: glow.0.clone(),
+            color: TURN_COLOR.with_alpha(PLAYABLE_ALPHA),
+            // Sliced, so the glow fades out over the same width around any
+            // card, starting at its edges.
+            image_mode: SpriteImageMode::Sliced(TextureSlicer {
+                border: BorderRect::all(GLOW_FADE),
+                max_corner_scale: PLAYABLE_REACH / GLOW_FADE,
+                ..default()
+            }),
+            ..default()
+        },
+    ));
+}
+
+/// Takes the glow away once a card can't be played anymore.
+fn unglow_playable(
+    remove: On<Remove<Playable>>,
+    children: Query<&Children>,
+    glows: Query<(), With<PlayableGlow>>,
+    mut commands: Commands,
+) {
+    for child in children.iter_descendants(remove.entity) {
+        if glows.contains(child) {
+            // The card may be on its way out, with its glow.
+            commands.entity(child).try_despawn();
+        }
+    }
+}
+
+/// Sizes the glows of playable cards to their cards, and keeps them below
+/// every card in the hand.
+fn fit_playable_glows(
+    cards: Query<(&Sprite, &Transform), Without<PlayableGlow>>,
+    mut glows: Query<(&ChildOf, &mut Sprite, &mut Transform), With<PlayableGlow>>,
+) {
+    for (child_of, mut sprite, mut transform) in &mut glows {
+        let Ok((card, card_transform)) = cards.get(child_of.parent()) else {
+            continue;
+        };
+        let Some(card_size) = card.custom_size else {
+            continue;
+        };
+        let size = card_size + Vec2::splat(PLAYABLE_REACH * 2.);
+        if sprite.custom_size != Some(size) {
+            sprite.custom_size = Some(size);
+        }
+        let z = PLAYABLE_GLOW_Z - card_transform.translation.z;
+        if transform.translation.z != z {
+            transform.translation.z = z;
+        }
+    }
+}
+
 
 /// The card back standing for another player's hand.
 #[derive(Component, Clone)]

@@ -21,6 +21,9 @@ const GRAIN_STRENGTH: f32 = 0.04;
 
 /// Side of the glow texture, which is stretched around what glows.
 const GLOW_SIZE: u32 = 64;
+/// Width of the glow's fading edge, in pixels of its texture: it's solid in
+/// the middle half.
+pub const GLOW_FADE: f32 = GLOW_SIZE as f32 / 4.;
 
 pub struct TablePlugin;
 
