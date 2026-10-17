@@ -100,7 +100,8 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:
-          path: ./builds
+          name: wasm
+          path: ./builds/wasm
 
       - name: Install butler
         run: |
