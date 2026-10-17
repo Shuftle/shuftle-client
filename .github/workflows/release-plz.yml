@@ -16,6 +16,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
+      # Starts the release build.
+      actions: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -29,11 +31,23 @@ jobs:
         run: |
           sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev
       - name: Run release-plz
+        id: release-plz
         uses: release-plz/action@v0.5
         with:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Tags pushed with GITHUB_TOKEN don't trigger other workflows, so this
+      # starts the release build of each new tag.
+      - name: Build the release
+        if: steps.release-plz.outputs.releases_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          for tag in $(jq -r '.[].tag' <<< "$RELEASES"); do
+            gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main -f version="$tag"
+          done
 
   release-plz-pr:
     name: Release-plz PR
