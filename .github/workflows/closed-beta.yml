@@ -1,0 +1,96 @@
+name: Closed beta
+
+# Every change to main goes to Google Play's closed testing track.
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - ".github/**"
+      - "deny.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: closed-beta
+  cancel-in-progress: false
+
+env:
+  play_package: eu.vitkorp.shuftle
+
+jobs:
+  android:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    permissions:
+      # Authenticates to Google Cloud without a stored key.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The version code counts the commits.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Number the build
+        # Play needs a unique version code per upload.
+        run: echo "ANDROID_VERSION_CODE=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+      - name: Download assets
+        run: |
+          mkdir -p assets
+          sudo apt-get update && sudo apt-get install -y megatools
+          megatools dl --path assets https://mega.nz/folder/DOZ1HCTb#sD5HuQYbZpOx2hS0apSXhQ
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Install Android SDK packages
+        # The versions come from the Gradle version catalog, as in flake.nix.
+        run: |
+          read -r compile_sdk build_tools ndk < <(python3 -c '
+          import tomllib
+          v = tomllib.load(open("android/gradle/libs.versions.toml", "rb"))["versions"]
+          print(v["androidCompileSdk"], v["androidBuildTools"], v["androidNdk"])')
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-$compile_sdk" "build-tools;$build_tools" "ndk;$ndk" > /dev/null
+          # The runner presets ANDROID_NDK_ROOT to its default NDK: point both at ours.
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
+      # Exposes the upload key declared in secretspec.toml to the build.
+      - uses: cachix/secretspec-action@main
+        with:
+          profile: production
+          scope: android
+          provider: env
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      - name: Build the signed bundle
+        working-directory: android
+        run: ./gradlew bundleRelease
+      # Keyless: the Play service account is reached through workload identity federation.
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.PLAY_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.PLAY_SERVICE_ACCOUNT }}
+      - name: Upload bundle to Google Play
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJson: ${{ steps.auth.outputs.credentials_file_path }}
+          packageName: ${{ env.play_package }}
+          releaseName: ${{ github.sha }}
+          releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
+          tracks: alpha
