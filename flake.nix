@@ -21,7 +21,7 @@
           };
         };
         rust = pkgs.rust-bin.stable.latest.default.override {
-          targets = [ "wasm32-unknown-unknown" "aarch64-linux-android" ];
+          targets = [ "wasm32-unknown-unknown" "aarch64-linux-android" "x86_64-linux-android" ];
         };
         # The SDK versions the Gradle build expects, from its version catalog.
         androidVersions = (builtins.fromTOML (builtins.readFile ./android/gradle/libs.versions.toml)).versions;
@@ -46,6 +46,7 @@
             cargo-ndk
             gradle
             jdk21_headless
+            secretspec
           ];
           buildInputs = [
               bacon
