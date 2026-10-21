@@ -3,6 +3,7 @@
 
     <application
         android:appCategory="game"
+        android:icon="@mipmap/ic_launcher"
         android:label="Shuftle"
         android:theme="@style/Theme.AppCompat.NoActionBar">
         <activity
