@@ -97,6 +97,18 @@ jobs:
     needs: release-wasm
 
     steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: secretspec.toml
+      # Exposes the key declared in secretspec.toml to butler.
+      - uses: cachix/secretspec-action@main
+        with:
+          profile: production
+          scope: itch
+          provider: env
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_CREDENTIALS }}
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:
@@ -110,8 +122,6 @@ jobs:
           chmod +x butler
           ./butler -V
       - name: Upload to itch.io
-        env:
-          BUTLER_API_KEY: ${{ secrets.BUTLER_CREDENTIALS }}
         run: |
           for dir in builds/*/; do
             channel=$(basename "$dir")
