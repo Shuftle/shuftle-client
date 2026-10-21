@@ -3,11 +3,10 @@ plugins {
 }
 
 def minSdkVersion = 31
-def rustAbis = ['arm64-v8a']
+def rustAbis = ['arm64-v8a', 'x86_64']
 
 // The app version follows the game crate's.
 def cargoVersion = (rootProject.file('../Cargo.toml').text =~ /(?m)^version\s*=\s*"([^"]+)"/)[0][1]
-def (major, minor, patch) = cargoVersion.tokenize('.').collect { it.replaceAll(/\D.*/, '') as int }
 
 // GameActivity's Java side must match the native glue `android-activity`
 // compiles in, so a Bevy upgrade can silently break it.
@@ -31,18 +30,38 @@ android {
     ndkVersion = libs.versions.androidNdk.get()
 
     defaultConfig {
-        applicationId = 'io.github.shuftle'
+        applicationId = 'eu.vitkorp.shuftle'
         minSdk = minSdkVersion
         targetSdk = libs.versions.androidCompileSdk.get() as int
-        versionCode = major * 1000000 + minor * 1000 + patch
+        // Play needs a unique code per upload: CI numbers them by commit.
+        versionCode = (System.getenv('ANDROID_VERSION_CODE') ?: '1') as int
         versionName = cargoVersion
         ndk {
             abiFilters.addAll(rustAbis)
         }
     }
+    // The upload key, from the environment (see secretspec.toml). Without it
+    // the release build is left unsigned.
+    def keystoreBase64 = System.getenv('ANDROID_KEYSTORE_BASE64')
+    signingConfigs {
+        release {
+            if (keystoreBase64) {
+                def keystore = layout.buildDirectory.file('upload-keystore.jks').get().asFile
+                keystore.parentFile.mkdirs()
+                keystore.bytes = Base64.mimeDecoder.decode(keystoreBase64)
+                storeFile = keystore
+                storePassword = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias = System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword = System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled = false
+            if (keystoreBase64) {
+                signingConfig = signingConfigs.release
+            }
         }
     }
     compileOptions {
