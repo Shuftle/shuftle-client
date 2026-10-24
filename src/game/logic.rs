@@ -644,9 +644,11 @@ fn restart_game(
 
 /// Drops what the game left to do later, like a bot's next play, so it
 /// doesn't happen in the menu.
-fn cancel_delayed(mut commands: Commands, queues: Query<Entity, With<DelayedCommandQueue>>) {
-    for queue in &queues {
-        commands.entity(queue).despawn();
+fn cancel_delayed(mut commands: Commands, mut queues: Query<(Entity, &mut DelayedCommandQueue)>) {
+    for (entity, mut queue) in &mut queues {
+        // Dropped on purpose, unlike commands someone forgot to apply.
+        queue.queue.silence_drop_warning();
+        commands.entity(entity).despawn();
     }
 }
 
