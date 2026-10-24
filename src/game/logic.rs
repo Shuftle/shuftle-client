@@ -1,12 +1,9 @@
 use bevy::{
     ecs::{schedule::common_conditions::any_with_component, system::SystemId},
-    input::keyboard::KeyboardInput,
-    input_focus::FocusedInput,
     prelude::*,
     sprite::{BorderRect, TextureSlicer},
     time::DelayedCommandQueue,
     transform::TransformSystems,
-    ui_widgets::Activate,
     window::RequestRedraw,
 };
 use shuftlib::{
@@ -14,14 +11,11 @@ use shuftlib::{
     tressette::{Action, Event, PerTeam, Seat, Team, Tressette, TressetteCard},
 };
 
-use crate::{
-    layout::{BAR_HEIGHT, Place, SAFE_TOP, Side, TableLayout},
-    loading::CardImages,
-    menu::widgets::{bar_button, full_screen, menu_button},
-    state::{AppState, is_back},
+use super::{
+    layout::{Place, Side, TableLayout},
     table::{GLOW_FADE, Glow},
-    theme::{BAR, FONT_BODY, FULL, ITEM_GAP},
 };
+use crate::{assets::CardImages, state::AppState};
 
 /// The seat of the player in front of the screen.
 const POV: Seat = Seat::South;
@@ -123,8 +117,8 @@ const PLAYABLE_REACH: f32 = 6.;
 /// Depth of that glow, below every card in the hand.
 const PLAYABLE_GLOW_Z: f32 = 0.5;
 /// Colours of the POV player's team, and of the other one.
-const US_COLOR: Color = Color::srgb(0.55, 0.78, 1.);
-const THEM_COLOR: Color = Color::srgb(1., 0.6, 0.55);
+pub const US_COLOR: Color = Color::srgb(0.55, 0.78, 1.);
+pub const THEM_COLOR: Color = Color::srgb(1., 0.6, 0.55);
 
 /// Drawing order: hand cards are 1 and up, in hand order. Cards in the same
 /// layer are ordered by [`card_order`], so overlapping ones don't flicker.
@@ -157,7 +151,6 @@ impl Plugin for GameLogic {
                             .or_else(resource_changed::<GameState>)
                             .or_else(resource_changed::<TableLayout>),
                     ),
-                    show_score.run_if(resource_changed::<ShownScore>),
                 )
                     .run_if(in_state(AppState::InGame)),
             )
@@ -183,7 +176,7 @@ impl Plugin for GameLogic {
             )
             .add_observer(glow_playable)
             .add_observer(unglow_playable)
-            .add_observer(back_to_menu.run_if(in_state(AppState::InGame)))
+            .add_observer(restart_game)
             .init_resource::<SetupGameId>()
             .init_resource::<NonPovPlayId>()
             .init_resource::<EnablePovId>()
@@ -241,62 +234,6 @@ fn init_scene(
             ]
         });
     }
-
-    // The top bar, below the room phones keep for the status bar and camera.
-    let bar_scoped = scoped.clone();
-    commands.spawn_scene(bsn! {
-        Node {
-            position_type: PositionType::Absolute,
-            width: FULL,
-            height: {px(SAFE_TOP + BAR_HEIGHT)},
-            padding: {UiRect { left: px(ITEM_GAP), right: px(ITEM_GAP), top: px(SAFE_TOP), ..default() }},
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::SpaceBetween,
-        }
-        bar_scoped
-        BackgroundColor(BAR)
-        Children [
-            @bar_button("Menu")
-            on(open_menu)
-            --
-            Text
-            TextFont { font_size: FontSize::Px(FONT_BODY) }
-            ScoreText
-            Children [
-                TextSpan
-                TextFont { font_size: FontSize::Px(FONT_BODY) }
-                TextColor({US_COLOR})
-                UsScore
-                --
-                TextSpan("   ")
-                TextFont { font_size: FontSize::Px(FONT_BODY) }
-                --
-                TextSpan
-                TextFont { font_size: FontSize::Px(FONT_BODY) }
-                TextColor({THEM_COLOR})
-                ThemScore
-            ]
-        ]
-    });
-
-    // The restart button, centred on the table and hidden until the game is
-    // over. What centres it covers the screen, so it lets taps through.
-    let ignore = Pickable::IGNORE;
-    commands.spawn_scene(bsn! {
-        @full_screen()
-        Node {
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-        }
-        ignore
-        scoped
-        Children [
-            @menu_button("Restart Game")
-            Node { display: Display::None }
-            RestartButton
-            on(restart_game)
-        ]
-    });
 
     // Call system to setup game.
     commands.run_system(setup_game_sys.0);
@@ -592,18 +529,6 @@ fn handle_effect(
     }
 }
 
-/// Writes the score in the top bar.
-fn show_score(
-    shown: Res<ShownScore>,
-    mut label: Single<&mut Text, With<ScoreText>>,
-    mut us: Single<&mut TextSpan, (With<UsScore>, Without<ThemScore>)>,
-    mut them: Single<&mut TextSpan, With<ThemScore>>,
-) {
-    label.0 = if shown.is_final { "Final  " } else { "" }.into();
-    us.0 = format!("Us {}", shown.us);
-    them.0 = format!("Them {}", shown.them);
-}
-
 #[derive(Component)]
 struct ToDespawn;
 
@@ -657,7 +582,6 @@ fn mark_for_despawn_and_continue(
     setup_game_id: Res<SetupGameId>,
     game: Res<GameState>,
     mut cards_being_collected: ResMut<CardsBeingCollected>,
-    mut button_query: Query<&mut Node, With<RestartButton>>,
     mut commands: Commands,
 ) {
     // Decrement counter for the card that just arrived
@@ -676,9 +600,7 @@ fn mark_for_despawn_and_continue(
         // After marking cards for despawn, check what to do next based on the
         // last step
         if game.is_over() {
-            if let Ok(mut node) = button_query.single_mut() {
-                node.display = Display::Flex;
-            }
+            commands.trigger(GameOver);
         } else if game.hand_score().is_some() {
             commands.run_system(setup_game_id.0);
         } else if game.trick_taker().is_some() {
@@ -693,14 +615,20 @@ fn despawn_marked(mut commands: Commands, query: Query<Entity, With<ToDespawn>>)
     }
 }
 
-/// Called when the restart button, shown once the game is over, is activated.
+/// Triggered once the game is over.
+#[derive(Event)]
+pub struct GameOver;
+
+/// Trigger to start a new game once one is over.
+#[derive(Event)]
+pub struct RestartGame;
+
 fn restart_game(
-    activate: On<Activate>,
+    _: On<RestartGame>,
     setup_game_id: Res<SetupGameId>,
     mut game: ResMut<GameState>,
     mut shown: ResMut<ShownScore>,
     card_query: Query<Entity, With<Card>>,
-    mut button_query: Query<&mut Node, With<RestartButton>>,
     mut commands: Commands,
 ) {
     // Mark all cards for despawn
@@ -710,29 +638,8 @@ fn restart_game(
     // Reset game state
     *game = GameState::new();
     *shown = ShownScore::default();
-    // Hide the button
-    if let Ok(mut node) = button_query.get_mut(activate.entity) {
-        node.display = Display::None;
-    }
     // Restart game
     commands.run_system(setup_game_id.0);
-}
-
-/// Called when the menu button in the top bar is activated: the game is left
-/// for the main menu.
-fn open_menu(_: On<Activate>, mut next: ResMut<NextState<AppState>>) {
-    next.set(AppState::Menu);
-}
-
-/// Leaves the game for the main menu on Esc, or Android's back gesture.
-fn back_to_menu(
-    key: On<FocusedInput<KeyboardInput>>,
-    windows: Query<(), With<Window>>,
-    mut next: ResMut<NextState<AppState>>,
-) {
-    if is_back(&key, &windows) {
-        next.set(AppState::Menu);
-    }
 }
 
 /// Drops what the game left to do later, like a bot's next play, so it
@@ -968,27 +875,13 @@ struct Pulse;
 #[derive(Component, Default, Clone)]
 struct MarkerName;
 
-/// The POV player's team's score, and the other team's, in the top bar.
-#[derive(Component, Default, Clone)]
-struct UsScore;
-
-#[derive(Component, Default, Clone)]
-struct ThemScore;
-
-/// The score the top bar shows.
+/// The score to show: the POV player's team's, and the other team's.
 #[derive(Resource, Default)]
-struct ShownScore {
-    us: u8,
-    them: u8,
-    is_final: bool,
+pub struct ShownScore {
+    pub us: u8,
+    pub them: u8,
+    pub is_final: bool,
 }
-
-#[derive(Component, Default, Clone)]
-struct ScoreText;
-
-/// The restart button, shown only once the game is over.
-#[derive(Component, Default, Clone)]
-struct RestartButton;
 
 /// Asks for another frame.
 fn redraw(mut redraw: MessageWriter<RequestRedraw>) {

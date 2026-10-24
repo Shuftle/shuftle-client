@@ -2,11 +2,13 @@
 
 use bevy::{prelude::*, ui_widgets::Activate};
 
-use super::widgets::{equal_share, full_screen, menu_button, screen_padding};
 use crate::{
-    layout::Orient,
     state::{AppState, Screen},
-    theme::{FONT_TITLE, ITEM_GAP, TEXT},
+    ui::{
+        orient::Orient,
+        theme::{FONT_TITLE, ITEM_GAP, TEXT},
+        widgets::{equal_share, full_screen, menu_button, screen_padding},
+    },
 };
 
 /// Whether the platform lets apps quit: phones and browsers leave that to

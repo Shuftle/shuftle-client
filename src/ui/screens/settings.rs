@@ -2,8 +2,10 @@
 
 use bevy::prelude::*;
 
-use super::widgets::screen;
-use crate::{state::Screen, theme::TEXT};
+use crate::{
+    state::Screen,
+    ui::{theme::TEXT, widgets::screen},
+};
 
 pub fn scene() -> impl Scene {
     screen(

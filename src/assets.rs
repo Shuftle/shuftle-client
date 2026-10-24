@@ -11,11 +11,7 @@ use shuftlib::{
     tressette::TressetteCard,
 };
 
-use crate::{
-    menu::widgets::full_screen,
-    state::AppState,
-    theme::{FONT_HEADING, TEXT},
-};
+use crate::state::AppState;
 
 /// The deck the cards are drawn from.
 const DECK: &str = "cards/italian/paris/svg-cards";
@@ -24,7 +20,7 @@ pub struct LoadingPlugin;
 
 impl Plugin for LoadingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::Loading), (load_cards, spawn_screen))
+        app.add_systems(OnEnter(AppState::Loading), load_cards)
             // Before the state transition, so the game starts in the frame the
             // last image came in.
             .add_systems(
@@ -123,23 +119,6 @@ fn progress(images: &CardImages, asset_server: &AssetServer) -> Option<AppState>
         loaded &= asset_server.is_loaded_with_dependencies(image);
     }
     loaded.then_some(AppState::InGame)
-}
-
-fn spawn_screen(mut commands: Commands) {
-    let scoped = DespawnOnExit(AppState::Loading);
-    commands.spawn_scene(bsn! {
-        @full_screen()
-        Node {
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-        }
-        scoped
-        Children [
-            Text("Loading…")
-            TextFont { font_size: FontSize::Px(FONT_HEADING) }
-            TextColor(TEXT)
-        ]
-    });
 }
 
 /// Asks for another frame.

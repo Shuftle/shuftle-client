@@ -5,7 +5,8 @@ use bevy::{
     ui_widgets::{Activate, Button},
 };
 
-use crate::{layout::SAFE_TOP, state::Screen, theme::*};
+use super::theme::*;
+use crate::{game::layout::SAFE_TOP, state::Screen};
 
 /// A button shaded as the pointer moves over, presses and leaves it.
 #[derive(Component, Default, Clone)]
