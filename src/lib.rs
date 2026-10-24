@@ -1,6 +1,9 @@
 pub mod camera;
 pub mod game_logic;
 pub mod layout;
+pub mod loading;
+pub mod menu;
+pub mod state;
 pub mod table;
 
 use std::time::Duration;
@@ -12,6 +15,9 @@ use bevy::{
 use camera::CameraPlugin;
 use game_logic::GameLogic;
 use layout::LayoutPlugin;
+use loading::LoadingPlugin;
+use menu::MenuPlugin;
+use state::StatePlugin;
 use table::TablePlugin;
 
 /// The most time a frame moves the game on by. The game's clock comes from the
@@ -45,7 +51,10 @@ pub fn app(window: Window) -> App {
                 meta_check: bevy::asset::AssetMetaCheck::Never,
                 ..default()
             }),
+        StatePlugin,
         LayoutPlugin,
+        MenuPlugin,
+        LoadingPlugin,
         TablePlugin,
         GameLogic,
         CameraPlugin,

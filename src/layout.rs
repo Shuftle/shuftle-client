@@ -5,7 +5,10 @@
 //! Positions are in world units, which match logical pixels, with the origin
 //! at the centre of the screen.
 
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::{
+    prelude::*,
+    window::{PrimaryWindow, WindowResized, WindowScaleFactorChanged},
+};
 
 /// Width over height of the card images.
 const CARD_ASPECT: f32 = 169.075 / 244.64;
@@ -28,7 +31,12 @@ pub struct LayoutPlugin;
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(TableLayout::new(Vec2::new(1280., 720.), SAFE_TOP))
-            .add_systems(PreUpdate, update_layout);
+            .add_systems(
+                PreUpdate,
+                update_layout.run_if(
+                    on_message::<WindowResized>.or_else(on_message::<WindowScaleFactorChanged>),
+                ),
+            );
     }
 }
 
