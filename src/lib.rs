@@ -5,6 +5,7 @@ pub mod loading;
 pub mod menu;
 pub mod state;
 pub mod table;
+pub mod theme;
 
 use std::time::Duration;
 

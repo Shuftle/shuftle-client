@@ -1,12 +1,12 @@
 use bevy::{
     ecs::{schedule::common_conditions::any_with_component, system::SystemId},
-    input::keyboard::{Key, KeyboardInput},
+    input::keyboard::KeyboardInput,
     input_focus::FocusedInput,
     prelude::*,
     sprite::{BorderRect, TextureSlicer},
     time::DelayedCommandQueue,
     transform::TransformSystems,
-    ui_widgets::{Activate, Button},
+    ui_widgets::Activate,
     window::RequestRedraw,
 };
 use shuftlib::{
@@ -17,8 +17,10 @@ use shuftlib::{
 use crate::{
     layout::{BAR_HEIGHT, Place, SAFE_TOP, Side, TableLayout},
     loading::CardImages,
-    state::AppState,
+    menu::widgets::{bar_button, full_screen, menu_button},
+    state::{AppState, is_back},
     table::{GLOW_FADE, Glow},
+    theme::{BAR, FONT_BODY, FULL, ITEM_GAP},
 };
 
 /// The seat of the player in front of the screen.
@@ -103,6 +105,17 @@ const BOT_PLAY_DELAY: f32 = 0.7;
 const TURN_COLOR: Color = Color::srgb(1., 0.84, 0.45);
 /// Size of a turn glow, relative to its marker.
 const GLOW_SCALE: f32 = 1.7;
+/// A turn glow's opacity swings this much either side of its middle, once a
+/// second.
+const PULSE_MIDDLE: f32 = 0.55;
+const PULSE_SWING: f32 = 0.3;
+/// Height of the card count on a marker, as a share of the marker's.
+const COUNT_SHARE: f32 = 0.4;
+/// Tint of the cards in the hand that can't be played.
+const UNPLAYABLE_TINT: Color = Color::linear_rgb(0.3, 0.3, 0.3);
+/// How far off its slot a hand card can be before it moves there rather than
+/// jumping.
+const SNAP_DISTANCE: f32 = 0.5;
 /// How opaque the glow around the cards the POV player can play is, in the turn
 /// colour, and how far it reaches past their edges.
 const PLAYABLE_ALPHA: f32 = 0.85;
@@ -234,40 +247,32 @@ fn init_scene(
     commands.spawn_scene(bsn! {
         Node {
             position_type: PositionType::Absolute,
-            width: percent(100),
+            width: FULL,
             height: {px(SAFE_TOP + BAR_HEIGHT)},
-            padding: {UiRect { left: px(12), right: px(12), top: px(SAFE_TOP), ..default() }},
+            padding: {UiRect { left: px(ITEM_GAP), right: px(ITEM_GAP), top: px(SAFE_TOP), ..default() }},
             align_items: AlignItems::Center,
             justify_content: JustifyContent::SpaceBetween,
         }
         bar_scoped
-        BackgroundColor({Color::srgba(0., 0., 0., 0.3)})
+        BackgroundColor(BAR)
         Children [
-            Button
-            Node {
-                padding: {UiRect::axes(px(10), px(4))},
-            }
-            BackgroundColor({Color::srgba(1., 1., 1., 0.15)})
+            @bar_button("Menu")
             on(open_menu)
-            Children [
-                Text("Menu")
-                TextFont { font_size: FontSize::Px(20.) }
-            ]
             --
             Text
-            TextFont { font_size: FontSize::Px(24.) }
+            TextFont { font_size: FontSize::Px(FONT_BODY) }
             ScoreText
             Children [
                 TextSpan
-                TextFont { font_size: FontSize::Px(24.) }
+                TextFont { font_size: FontSize::Px(FONT_BODY) }
                 TextColor({US_COLOR})
                 UsScore
                 --
                 TextSpan("   ")
-                TextFont { font_size: FontSize::Px(24.) }
+                TextFont { font_size: FontSize::Px(FONT_BODY) }
                 --
                 TextSpan
-                TextFont { font_size: FontSize::Px(24.) }
+                TextFont { font_size: FontSize::Px(FONT_BODY) }
                 TextColor({THEM_COLOR})
                 ThemScore
             ]
@@ -278,28 +283,18 @@ fn init_scene(
     // over. What centres it covers the screen, so it lets taps through.
     let ignore = Pickable::IGNORE;
     commands.spawn_scene(bsn! {
+        @full_screen()
         Node {
-            position_type: PositionType::Absolute,
-            width: percent(100),
-            height: percent(100),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
         }
         ignore
         scoped
         Children [
-            Button
-            Node {
-                padding: {UiRect::all(px(12))},
-                display: Display::None,
-            }
-            BackgroundColor({Color::srgb(0.5, 0.5, 0.5)})
+            @menu_button("Restart Game")
+            Node { display: Display::None }
             RestartButton
             on(restart_game)
-            Children [
-                Text("Restart Game")
-                TextFont { font_size: FontSize::Px(24.) }
-            ]
         ]
     });
 
@@ -433,7 +428,9 @@ fn place_cards(
         let size = layout.card_size(place);
 
         let Some(mut travel) = travel else {
-            if *spot == Spot::Hand && transform.translation.with_z(z).distance(target) >= 0.5 {
+            if *spot == Spot::Hand
+                && transform.translation.with_z(z).distance(target) >= SNAP_DISTANCE
+            {
                 // Move rather than jump to a new slot, as when two rows merge
                 // into one.
                 commands.entity(entity).insert(Travel::default());
@@ -510,7 +507,8 @@ fn show_turn(
             if sprite.custom_size != Some(size) {
                 sprite.custom_size = Some(size);
             }
-            let pulse = 0.55 + 0.3 * (time.elapsed_secs() * std::f32::consts::TAU).sin();
+            let pulse =
+                PULSE_MIDDLE + PULSE_SWING * (time.elapsed_secs() * std::f32::consts::TAU).sin();
             sprite.color = TURN_COLOR.with_alpha(pulse);
         }
     }
@@ -543,7 +541,7 @@ fn place_markers(
                 }
                 // A squeezed window can shrink markers to nothing, but text can't
                 // be sized 0.
-                font.set_if_neq(TextFont::from_font_size((size.y * 0.4).max(1.)));
+                font.set_if_neq(TextFont::from_font_size((size.y * COUNT_SHARE).max(1.)));
             }
             if let Ok((mut name_transform, mut font)) = names.get_mut(child) {
                 let (font_size, below) = layout.marker_label();
@@ -726,19 +724,13 @@ fn open_menu(_: On<Activate>, mut next: ResMut<NextState<AppState>>) {
     next.set(AppState::Menu);
 }
 
-/// Leaves the game for the main menu on Esc, or Android's back gesture, once
-/// the key reaches the window: nothing focused on the way kept it.
+/// Leaves the game for the main menu on Esc, or Android's back gesture.
 fn back_to_menu(
     key: On<FocusedInput<KeyboardInput>>,
     windows: Query<(), With<Window>>,
     mut next: ResMut<NextState<AppState>>,
 ) {
-    let input = &key.input;
-    if windows.contains(key.event_target())
-        && input.state.is_pressed()
-        && !input.repeat
-        && matches!(input.logical_key, Key::Escape | Key::BrowserBack)
-    {
+    if is_back(&key, &windows) {
         next.set(AppState::Menu);
     }
 }
@@ -793,7 +785,7 @@ fn enable_pov(
             sprite.color = Color::WHITE;
         } else {
             commands.entity(entity).remove::<Playable>();
-            sprite.color = Color::linear_rgb(0.3, 0.3, 0.3);
+            sprite.color = UNPLAYABLE_TINT;
         }
     }
 }

@@ -11,7 +11,11 @@ use shuftlib::{
     tressette::TressetteCard,
 };
 
-use crate::state::AppState;
+use crate::{
+    menu::widgets::full_screen,
+    state::AppState,
+    theme::{FONT_HEADING, TEXT},
+};
 
 /// The deck the cards are drawn from.
 const DECK: &str = "cards/italian/paris/svg-cards";
@@ -124,17 +128,16 @@ fn progress(images: &CardImages, asset_server: &AssetServer) -> Option<AppState>
 fn spawn_screen(mut commands: Commands) {
     let scoped = DespawnOnExit(AppState::Loading);
     commands.spawn_scene(bsn! {
+        @full_screen()
         Node {
-            position_type: PositionType::Absolute,
-            width: percent(100),
-            height: percent(100),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
         }
         scoped
         Children [
             Text("Loading…")
-            TextFont { font_size: FontSize::Px(32.) }
+            TextFont { font_size: FontSize::Px(FONT_HEADING) }
+            TextColor(TEXT)
         ]
     });
 }
