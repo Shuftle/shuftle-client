@@ -4,7 +4,7 @@ androidCompileSdk = "36"
 androidBuildTools = "37.0.0"
 androidNdk = "29.0.14206865"
 
-agp = "9.4.1"
+agp = "9.5.0"
 appcompat = "1.8.0"
 # Must match the GameActivity version the `android-activity` crate (used by
 # Bevy) supports, see its README. The build fails when Cargo.lock moves to an
