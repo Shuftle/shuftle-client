@@ -14,7 +14,7 @@ use bevy::{
 use camera::CameraPlugin;
 use game::{layout::LayoutPlugin, logic::GameLogic, table::TablePlugin};
 use state::StatePlugin;
-use ui::{hud::HudPlugin, orient::OrientPlugin, screens::MenuPlugin};
+use ui::{hud::HudPlugin, screens::MenuPlugin};
 
 /// The most time a frame moves the game on by. The game's clock comes from the
 /// renderer, so after the game sat idle the wait can show up a frame or two
@@ -58,7 +58,6 @@ pub fn app(window: Window) -> App {
         TablePlugin,
         GameLogic,
         HudPlugin,
-        OrientPlugin,
         CameraPlugin,
     ))
     .insert_resource(power_saving())

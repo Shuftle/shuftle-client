@@ -6,7 +6,13 @@ mod loading;
 mod main_menu;
 mod settings;
 
-use bevy::{input::keyboard::KeyboardInput, input_focus::FocusedInput, prelude::*};
+use bevy::{
+    ecs::schedule::common_conditions::{any_component_removed, any_match_filter},
+    input::keyboard::KeyboardInput,
+    input_focus::FocusedInput,
+    prelude::*,
+    ui::{Checked, Pressed},
+};
 
 use super::widgets;
 use crate::state::{AppState, Screen, is_back};
@@ -20,10 +26,20 @@ impl Plugin for MenuPlugin {
             .add_systems(OnEnter(Screen::About), about::scene.spawn())
             .add_systems(OnEnter(AppState::Loading), loading::scene.spawn())
             .add_observer(back.run_if(in_state(AppState::Menu)))
-            .add_observer(widgets::button_over)
-            .add_observer(widgets::button_out)
-            .add_observer(widgets::button_press)
-            .add_observer(widgets::button_release);
+            .add_systems(
+                Update,
+                widgets::shade_buttons.run_if(
+                    any_match_filter::<widgets::ShadeChanged>
+                        .or_else(any_component_removed::<Pressed>)
+                        .or_else(any_component_removed::<Checked>),
+                ),
+            )
+            .add_systems(
+                Update,
+                widgets::shade_thumbs.run_if(any_match_filter::<widgets::ThumbChanged>),
+            )
+            .add_observer(widgets::drag_scroll_start)
+            .add_observer(widgets::drag_scroll);
     }
 }
 

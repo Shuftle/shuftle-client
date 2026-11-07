@@ -1,14 +1,23 @@
 //! Pieces the screens are built from.
 
 use bevy::{
+    picking::hover::Hovered,
     prelude::*,
-    ui_widgets::{Activate, Button},
+    ui::{Checked, Pressed},
+    ui_widgets::{
+        Activate, Button, ControlOrientation, ScrollArea, Scrollbar, ScrollbarDragState,
+        ScrollbarThumb,
+    },
 };
 
 use super::theme::*;
-use crate::{game::layout::SAFE_TOP, state::Screen};
+use crate::{
+    game::layout::{BAR_HEIGHT, SAFE_TOP},
+    state::Screen,
+};
 
-/// A button shaded as the pointer moves over, presses and leaves it.
+/// A button or option shaded by what Bevy's widgets track: pressed, hovered
+/// and chosen.
 #[derive(Component, Default, Clone)]
 pub struct MenuButton;
 
@@ -25,18 +34,12 @@ pub fn menu_button(label: &str) -> impl Scene {
     }
 }
 
-/// A small button, sized to its label, for the bar at the top of the table.
-pub fn bar_button(label: &str) -> impl Scene {
-    bsn! {
-        @button(label, FONT_SMALL, BAR_BUTTON_PADDING)
-    }
-}
-
 fn button(label: &str, font_size: f32, padding: Vec2) -> impl Scene {
     let ignore = Pickable::IGNORE;
     bsn! {
         MenuButton
         Button
+        Hovered
         Node {
             padding: {UiRect::axes(px(padding.x), px(padding.y))},
             border: {UiRect::all(px(BORDER))},
@@ -87,45 +90,177 @@ pub fn equal_share() -> impl Scene {
     }
 }
 
-/// A full screen with `title` at the top, a back button, and `body` below,
-/// shown while in `screen`.
+/// A full screen shown while in `screen`: a bar at the top with a back arrow
+/// and `title`, which stays put, and `body` below, in a centred column, which
+/// scrolls when it doesn't fit.
 pub fn screen(screen: Screen, title: &str, body: impl SceneList) -> impl Scene {
     let scoped = DespawnOnExit(screen);
     bsn! {
         @full_screen()
         Node {
             flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            padding: {screen_padding()},
-            row_gap: px(SECTION_GAP),
         }
         scoped
         Children [
-            Node {
-                width: FULL,
-                max_width: px(CONTENT_MAX_WIDTH),
-                align_items: AlignItems::Center,
-                column_gap: px(GUTTER),
-            }
-            Children [
-                @menu_button("Back")
-                Node { width: auto(), min_width: px(BUTTON_MIN_WIDTH) }
+            @app_bar(bsn_list! {
+                @back_arrow()
                 on(back)
                 --
                 Text(title)
                 TextFont { font_size: FontSize::Px(FONT_HEADING) }
                 TextColor(TEXT)
-            ]
+            })
             --
+            // The rest of the screen, scrolling, with a scrollbar on the right.
             Node {
                 width: FULL,
-                max_width: px(CONTENT_MAX_WIDTH),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                row_gap: px(ITEM_GAP),
+                flex_grow: 1.,
+                min_height: px(0),
             }
-            Children [ {body} ]
+            Children [
+                #Body
+                Node {
+                    flex_grow: 1.,
+                    min_width: px(0),
+                    overflow: Overflow::scroll_y(),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    padding: {UiRect::all(px(GUTTER))},
+                }
+                ScrollArea
+                DragScroll
+                Children [
+                    Node {
+                        width: FULL,
+                        max_width: px(CONTENT_MAX_WIDTH),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        row_gap: px(ITEM_GAP),
+                    }
+                    Children [ {body} ]
+                ]
+                --
+                Node {
+                    width: px(SCROLLBAR_WIDTH),
+                    margin: {UiRect::axes(px(SCROLLBAR_MARGIN), px(GUTTER))},
+                }
+                Scrollbar {
+                    target: #Body,
+                    orientation: ControlOrientation::Vertical,
+                    min_thumb_length: SCROLLBAR_MIN_THUMB,
+                }
+                Children [
+                    Hovered
+                    ScrollbarThumb {
+                        border_radius: {BorderRadius::all(px(SCROLLBAR_WIDTH * 0.5))},
+                    }
+                    BackgroundColor(THUMB)
+                ]
+            ]
         ]
+    }
+}
+
+/// The thumbs whose look may have changed: hovered, dragged, or resized as
+/// their content changed.
+pub type ThumbChanged = (
+    With<ScrollbarThumb>,
+    Or<(
+        Changed<Hovered>,
+        Changed<ScrollbarDragState>,
+        Changed<ComputedNode>,
+    )>,
+);
+
+/// Shades the scrollbar thumbs whose state changed: lighter while hovered or
+/// dragged, and hidden while the content fits, when the thumb fills its whole
+/// track.
+pub fn shade_thumbs(
+    mut thumbs: Query<
+        (
+            &Hovered,
+            &ScrollbarDragState,
+            &ComputedNode,
+            &ChildOf,
+            &mut BackgroundColor,
+        ),
+        ThumbChanged,
+    >,
+    tracks: Query<&ComputedNode, With<Scrollbar>>,
+) {
+    for (hovered, drag, thumb, track, mut background) in &mut thumbs {
+        let fills_track = tracks
+            .get(track.parent())
+            .is_ok_and(|track| thumb.size().y >= track.size().y);
+        let color = if fills_track {
+            Color::NONE
+        } else if hovered.get() || drag.dragging {
+            THUMB_ACTIVE
+        } else {
+            THUMB
+        };
+        background.set_if_neq(BackgroundColor(color));
+    }
+}
+
+/// The bar at the top of every screen and of the table, below the room phones
+/// keep for the status bar and camera, with `content` in a row.
+pub fn app_bar(content: impl SceneList) -> impl Scene {
+    bsn! {
+        Node {
+            width: FULL,
+            height: {px(SAFE_TOP + BAR_HEIGHT)},
+            align_items: AlignItems::Center,
+            column_gap: px(ITEM_GAP),
+            padding: {UiRect {
+                top: px(SAFE_TOP),
+                left: px(GUTTER),
+                right: px(GUTTER),
+                ..default()
+            }},
+        }
+        BackgroundColor(BAR)
+        Children [ {content} ]
+    }
+}
+
+/// The arrow back to the screen above, as big as Android's minimum touch
+/// target.
+pub fn back_arrow() -> impl Scene {
+    bsn! {
+        @button("<", FONT_HEADING, Vec2::ZERO)
+        Node {
+            width: px(MIN_TAP),
+            height: px(MIN_TAP),
+        }
+    }
+}
+
+/// A node that scrolls when it's dragged.
+#[derive(Component, Default, Clone)]
+pub struct DragScroll {
+    /// Where it was scrolled to when the drag started.
+    start: Vec2,
+}
+
+/// Remembers where a dragged node was scrolled to.
+pub fn drag_scroll_start(
+    drag: On<PointerDragStart>,
+    mut nodes: Query<(&ComputedNode, &mut DragScroll)>,
+) {
+    if let Ok((node, mut scroll)) = nodes.get_mut(drag.entity) {
+        scroll.start = node.scroll_position * node.inverse_scale_factor;
+    }
+}
+
+/// Scrolls a dragged node by as much as the pointer moved, the other way.
+pub fn drag_scroll(
+    drag: On<PointerDrag>,
+    ui_scale: Res<UiScale>,
+    mut nodes: Query<(&DragScroll, &mut ScrollPosition)>,
+) {
+    if let Ok((scroll, mut position)) = nodes.get_mut(drag.entity) {
+        position.0 = (scroll.start - drag.distance / ui_scale.0).max(Vec2::ZERO);
     }
 }
 
@@ -136,30 +271,59 @@ fn back(_: On<Activate>, screen: Res<State<Screen>>, mut next: ResMut<NextState<
     }
 }
 
-pub fn button_over(over: On<PointerOver>, buttons: Query<&mut BackgroundColor, With<MenuButton>>) {
-    shade(over.entity, BUTTON_HOVERED, buttons);
-}
+/// The buttons and options whose look may have changed: pressed, hovered or
+/// chosen, as Bevy's widgets track it.
+pub type ShadeChanged = (
+    With<MenuButton>,
+    Or<(Changed<Pressed>, Changed<Hovered>, Added<Checked>)>,
+);
 
-pub fn button_out(out: On<PointerOut>, buttons: Query<&mut BackgroundColor, With<MenuButton>>) {
-    shade(out.entity, BUTTON, buttons);
-}
-
-pub fn button_press(
-    press: On<PointerPress>,
-    buttons: Query<&mut BackgroundColor, With<MenuButton>>,
+/// Shades the buttons and options whose state changed, or that lost `Pressed`
+/// or `Checked`.
+pub fn shade_buttons(
+    mut buttons: Query<
+        (
+            Has<Pressed>,
+            &Hovered,
+            Has<Checked>,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        With<MenuButton>,
+    >,
+    changed: Query<Entity, ShadeChanged>,
+    mut unpressed: RemovedComponents<Pressed>,
+    mut unchecked: RemovedComponents<Checked>,
 ) {
-    shade(press.entity, BUTTON_PRESSED, buttons);
-}
-
-pub fn button_release(
-    release: On<PointerRelease>,
-    buttons: Query<&mut BackgroundColor, With<MenuButton>>,
-) {
-    shade(release.entity, BUTTON_HOVERED, buttons);
-}
-
-fn shade(entity: Entity, color: Color, mut buttons: Query<&mut BackgroundColor, With<MenuButton>>) {
-    if let Ok(mut background) = buttons.get_mut(entity) {
-        background.set_if_neq(BackgroundColor(color));
+    let entities: Vec<Entity> = changed
+        .iter()
+        .chain(unpressed.read())
+        .chain(unchecked.read())
+        .collect();
+    for entity in entities {
+        if let Ok((pressed, hovered, checked, mut background, mut border)) = buttons.get_mut(entity)
+        {
+            let (color, edge) = shade(pressed, hovered.get(), checked);
+            background.set_if_neq(BackgroundColor(color));
+            border.set_if_neq(BorderColor::all(edge));
+        }
     }
+}
+
+/// Returns the background and edge of a button or option: darker while the
+/// pointer is over it or presses it, and lighter with a solid edge while it's
+/// the chosen option.
+fn shade(pressed: bool, hovered: bool, checked: bool) -> (Color, Color) {
+    let background = match (pressed, hovered, checked) {
+        (true, _, _) => BUTTON_PRESSED,
+        (false, true, _) => BUTTON_HOVERED,
+        (false, false, true) => CHOSEN,
+        (false, false, false) => BUTTON,
+    };
+    let edge = if checked {
+        CHOSEN_BORDER
+    } else {
+        BUTTON_BORDER
+    };
+    (background, edge)
 }
