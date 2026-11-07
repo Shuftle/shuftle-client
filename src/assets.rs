@@ -11,7 +11,10 @@ use shuftlib::{
     tressette::TressetteCard,
 };
 
-use crate::state::AppState;
+use crate::{
+    settings::CardLook,
+    state::{AppState, GameSession},
+};
 
 // The decks and backs the game ships, checked when the game was built.
 include!(concat!(env!("OUT_DIR"), "/cards.rs"));
@@ -57,6 +60,7 @@ pub struct LoadingPlugin;
 impl Plugin for LoadingPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Loading), load_cards)
+            .add_systems(OnExit(GameSession), free_cards)
             // Before the state transition, so the game starts in the frame the
             // last image came in.
             .add_systems(
@@ -68,9 +72,59 @@ impl Plugin for LoadingPlugin {
                     ),
                 ),
             )
-            // The asset server only takes in what finished loading while frames
-            // are drawn.
-            .add_systems(Last, redraw.run_if(in_state(AppState::Loading)));
+            .init_resource::<PendingImages>()
+            .add_observer(wait_for_image_node)
+            .add_systems(Last, keep_drawing.run_if(images_pending));
+    }
+}
+
+/// Images being waited for, which keep frames coming until they're in.
+#[derive(Resource, Default)]
+pub struct PendingImages(Vec<Handle<Image>>);
+
+impl PendingImages {
+    /// Keeps frames coming until `image` is loaded, or fails to, and returns it.
+    pub fn wait_for(&mut self, image: Handle<Image>) -> Handle<Image> {
+        self.0.push(image.clone());
+        image
+    }
+}
+
+/// Waits for the image of a UI node added while it's still loading.
+fn wait_for_image_node(
+    add: On<Add<ImageNode>>,
+    nodes: Query<&ImageNode>,
+    asset_server: Res<AssetServer>,
+    mut pending: ResMut<PendingImages>,
+) {
+    if let Ok(node) = nodes.get(add.entity)
+        && !asset_server.is_loaded_with_dependencies(&node.image)
+    {
+        pending.wait_for(node.image.clone());
+    }
+}
+
+/// Whether any image is still loading.
+fn images_pending(pending: Res<PendingImages>) -> bool {
+    !pending.0.is_empty()
+}
+
+/// Forgets the images that came in or failed, and asks for another frame
+/// while any is still loading.
+fn keep_drawing(
+    mut pending: ResMut<PendingImages>,
+    asset_server: Res<AssetServer>,
+    mut redraw: MessageWriter<RequestRedraw>,
+) {
+    pending.0.retain(|image| {
+        !asset_server.is_loaded_with_dependencies(image)
+            && !matches!(
+                asset_server.get_load_state(image),
+                Some(LoadState::Failed(_))
+            )
+    });
+    if !pending.0.is_empty() {
+        redraw.write(RequestRedraw);
     }
 }
 
@@ -94,21 +148,24 @@ impl CardImages {
     }
 }
 
-/// Asks for the images of the default deck and back. From the second game on
-/// they're loaded already, and the game starts right away.
+/// Asks for the images of the chosen deck and back. If they're all loaded
+/// already, the game starts right away.
 fn load_cards(
     asset_server: Res<AssetServer>,
+    card_look: Res<CardLook>,
+    mut pending: ResMut<PendingImages>,
     mut commands: Commands,
     mut next: ResMut<NextState<AppState>>,
 ) {
-    let (deck, back) = (DEFAULT_ITALIAN_DECK, DEFAULT_ITALIAN_BACK);
+    let (deck, back) = (card_look.deck.deck(), card_look.back.back());
+    let mut load = |path: String| pending.wait_for(asset_server.load(path));
     let faces = Suit::ALL
         .into_iter()
         .map(|suit| {
             ItalianRank::ALL
                 .into_iter()
                 .map(|rank| {
-                    asset_server.load(format!(
+                    load(format!(
                         "{ITALIAN_DECKS_DIR}/{}/{}",
                         deck.id,
                         italian_face(suit, rank)
@@ -119,12 +176,17 @@ fn load_cards(
         .collect();
     let images = CardImages {
         faces,
-        back: asset_server.load(format!("{ITALIAN_BACKS_DIR}/{}/{BACK_FILE}", back.id)),
+        back: load(format!("{ITALIAN_BACKS_DIR}/{}/{BACK_FILE}", back.id)),
     };
     if let Some(state) = progress(&images, &asset_server) {
         next.set(state);
     }
     commands.insert_resource(images);
+}
+
+/// Lets go of the cards' images once their game is over, or failed to load.
+fn free_cards(mut commands: Commands) {
+    commands.remove_resource::<CardImages>();
 }
 
 /// Starts the game once every image came in, or goes back to the menu if one
@@ -150,9 +212,4 @@ fn progress(images: &CardImages, asset_server: &AssetServer) -> Option<AppState>
         loaded &= asset_server.is_loaded_with_dependencies(image);
     }
     loaded.then_some(AppState::InGame)
-}
-
-/// Asks for another frame.
-fn redraw(mut redraw: MessageWriter<RequestRedraw>) {
-    redraw.write(RequestRedraw);
 }

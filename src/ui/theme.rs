@@ -4,6 +4,8 @@
 
 use bevy::prelude::*;
 
+use crate::assets::{CARD_HEIGHT, CARD_WIDTH};
+
 /// Text on the felt: a warm off-white, softer than pure white.
 pub const TEXT: Color = Color::srgb(0.96, 0.93, 0.85);
 
@@ -45,6 +47,18 @@ pub const CONTENT_MAX_WIDTH: f32 = 720.;
 pub const BUTTON_PADDING: Vec2 = Vec2::new(24., 10.);
 pub const BUTTON_RADIUS: f32 = 10.;
 pub const BORDER: f32 = 1.;
+/// Width of the edge of an option in a row of choices.
+pub const CHOICE_BORDER: f32 = 2.;
+/// Width of every option in a row of choices.
+pub const CHOICE_WIDTH: f32 = 140.;
+/// Space inside an option, around its preview and name, and between them.
+pub const CHOICE_PADDING: f32 = 10.;
+pub const CHOICE_GAP: f32 = 8.;
+/// An option's preview: a small card, in the cards' shape.
+pub const PREVIEW_WIDTH: f32 = 72.;
+pub const PREVIEW_HEIGHT: f32 = PREVIEW_WIDTH * CARD_HEIGHT as f32 / CARD_WIDTH as f32;
+/// Corner roundness of a preview, like a card's.
+pub const PREVIEW_RADIUS: f32 = 4.;
 
 /// The scrollbar beside a screen's content: its width, its space to the
 /// screen's edge, and the shortest its thumb gets.

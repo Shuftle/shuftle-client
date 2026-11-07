@@ -38,9 +38,25 @@ impl Screen {
 
 pub struct StatePlugin;
 
+/// A game, from loading to its end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct GameSession;
+
+impl ComputedStates for GameSession {
+    type SourceStates = AppState;
+    // No exit and enter between loading and playing.
+    const ALLOW_SAME_STATE_TRANSITIONS: bool = false;
+
+    fn compute(state: AppState) -> Option<Self> {
+        matches!(state, AppState::Loading | AppState::InGame).then_some(Self)
+    }
+}
+
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        app.init_state::<AppState>().add_sub_state::<Screen>();
+        app.init_state::<AppState>()
+            .add_sub_state::<Screen>()
+            .add_computed_state::<GameSession>();
     }
 }
 

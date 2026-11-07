@@ -5,8 +5,8 @@ use bevy::{
     prelude::*,
     ui::{Checked, Pressed},
     ui_widgets::{
-        Activate, Button, ControlOrientation, ScrollArea, Scrollbar, ScrollbarDragState,
-        ScrollbarThumb,
+        Activate, Button, ControlOrientation, RadioButton, RadioGroup, ScrollArea, Scrollbar,
+        ScrollbarDragState, ScrollbarThumb,
     },
 };
 
@@ -56,6 +56,122 @@ fn button(label: &str, font_size: f32, padding: Vec2) -> impl Scene {
             // Taps land on the button, not its label.
             ignore
         ]
+    }
+}
+
+/// The value an option in a row of choices stands for.
+#[derive(Component, Clone, Default)]
+pub struct Choice<T: Clone + Default + Send + Sync + Unpin + 'static>(pub T);
+
+/// What an option in a row of choices looks like, above its name.
+pub enum Preview {
+    /// An image, by its path in the assets, shown at the size of a card.
+    Image(String),
+    /// A swatch of a colour, the size of a card.
+    Swatch(Color),
+}
+
+/// An option in a row of choices: the value it stands for, its name, and what
+/// it looks like.
+pub struct ChoiceOption<T> {
+    pub value: T,
+    pub name: &'static str,
+    pub preview: Preview,
+}
+
+/// A row of choices: `label` above a tile per option, all the same size and
+/// centred, with the one whose value is `chosen` checked. Picking one triggers
+/// `ValueChange<Entity>` on the row, with the tile's entity, whose [`Choice`]
+/// holds the value.
+pub fn choice_row<T: Clone + Default + PartialEq + Send + Sync + Unpin + 'static>(
+    label: &str,
+    options: Vec<ChoiceOption<T>>,
+    chosen: &T,
+) -> impl Scene {
+    let options: Vec<_> = options
+        .into_iter()
+        .map(
+            |ChoiceOption {
+                 value,
+                 name,
+                 preview,
+             }| {
+                let checked = (value == *chosen).then_some(bsn! { Checked });
+                bsn! { @choice(name, preview) Choice::<T>(value) @{checked} }
+            },
+        )
+        .collect();
+    bsn! {
+        Node {
+            width: FULL,
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: px(ITEM_GAP),
+        }
+        Children [
+            Text(label)
+            TextFont { font_size: FontSize::Px(FONT_BODY) }
+            TextColor(TEXT)
+            --
+            Node {
+                width: FULL,
+                justify_content: JustifyContent::Center,
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: px(ITEM_GAP),
+                row_gap: px(ITEM_GAP),
+            }
+            RadioGroup
+            Children [ {options} ]
+        ]
+    }
+}
+
+/// An option in a row of choices: a tile with `preview` above `name`, shaded
+/// like a button, lighter and with a solid edge while it's the chosen one.
+fn choice(name: &str, preview: Preview) -> impl Scene {
+    let ignore = Pickable::IGNORE;
+    let (image, swatch) = match preview {
+        Preview::Image(path) => (Some(bsn! { ImageNode { image: {path} } }), None),
+        Preview::Swatch(color) => (None, Some(bsn! { BackgroundColor(color) })),
+    };
+    bsn! {
+        MenuButton
+        RadioButton
+        Hovered
+        Node {
+            width: px(CHOICE_WIDTH),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: px(CHOICE_GAP),
+            padding: {UiRect::all(px(CHOICE_PADDING))},
+            border: {UiRect::all(px(CHOICE_BORDER))},
+            border_radius: {BorderRadius::all(px(BUTTON_RADIUS))},
+        }
+        BackgroundColor(BUTTON)
+        BorderColor::all(BUTTON_BORDER)
+        Children [
+            @preview_size()
+            @{image}
+            @{swatch}
+            ignore
+            --
+            Text(name)
+            TextFont { font_size: FontSize::Px(FONT_SMALL) }
+            TextColor(TEXT)
+            // Taps land on the option, not its name.
+            ignore
+        ]
+    }
+}
+
+/// A preview in an option, the size of a small card.
+fn preview_size() -> impl Scene {
+    bsn! {
+        Node {
+            width: px(PREVIEW_WIDTH),
+            height: px(PREVIEW_HEIGHT),
+            border_radius: {BorderRadius::all(px(PREVIEW_RADIUS))},
+        }
     }
 }
 
