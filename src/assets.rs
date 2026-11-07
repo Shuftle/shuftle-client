@@ -13,8 +13,44 @@ use shuftlib::{
 
 use crate::state::AppState;
 
-/// The deck the cards are drawn from.
-const DECK: &str = "cards/italian/paris/svg-cards";
+// The decks and backs the game ships, checked when the game was built.
+include!(concat!(env!("OUT_DIR"), "/cards.rs"));
+
+/// A deck of cards in the assets.
+pub struct Deck {
+    /// Its folder in `ITALIAN_DECKS_DIR`, `<pattern>/<set>`.
+    pub id: &'static str,
+    /// What the game calls it.
+    pub name: &'static str,
+}
+
+impl Deck {
+    /// Returns the deck `id`, or the default one if it's gone.
+    pub fn find(id: &str) -> &'static Deck {
+        ITALIAN_DECKS
+            .iter()
+            .find(|deck| deck.id == id)
+            .unwrap_or(DEFAULT_ITALIAN_DECK)
+    }
+}
+
+/// A card back in the assets.
+pub struct Back {
+    /// Its folder in `ITALIAN_BACKS_DIR`.
+    pub id: &'static str,
+    /// What the game calls it.
+    pub name: &'static str,
+}
+
+impl Back {
+    /// Returns the back `id`, or the default one if it's gone.
+    pub fn find(id: &str) -> &'static Back {
+        ITALIAN_BACKS
+            .iter()
+            .find(|back| back.id == id)
+            .unwrap_or(DEFAULT_ITALIAN_BACK)
+    }
+}
 
 pub struct LoadingPlugin;
 
@@ -58,37 +94,32 @@ impl CardImages {
     }
 }
 
-/// Returns the name the deck's files use for `suit`.
-fn suit_name(suit: Suit) -> &'static str {
-    match suit {
-        Suit::Cups => "cups",
-        Suit::Coins => "coins",
-        Suit::Clubs => "clubs",
-        Suit::Swords => "swords",
-    }
-}
-
-/// Asks for the deck's images. From the second game on they're loaded
-/// already, and the game starts right away.
+/// Asks for the images of the default deck and back. From the second game on
+/// they're loaded already, and the game starts right away.
 fn load_cards(
     asset_server: Res<AssetServer>,
     mut commands: Commands,
     mut next: ResMut<NextState<AppState>>,
 ) {
+    let (deck, back) = (DEFAULT_ITALIAN_DECK, DEFAULT_ITALIAN_BACK);
     let faces = Suit::ALL
         .into_iter()
         .map(|suit| {
             ItalianRank::ALL
                 .into_iter()
                 .map(|rank| {
-                    asset_server.load(format!("{DECK}/{}-{}.png", suit_name(suit), rank as u8))
+                    asset_server.load(format!(
+                        "{ITALIAN_DECKS_DIR}/{}/{}",
+                        deck.id,
+                        italian_face(suit, rank)
+                    ))
                 })
                 .collect()
         })
         .collect();
     let images = CardImages {
         faces,
-        back: asset_server.load(format!("{DECK}/back.png")),
+        back: asset_server.load(format!("{ITALIAN_BACKS_DIR}/{}/{BACK_FILE}", back.id)),
     };
     if let Some(state) = progress(&images, &asset_server) {
         next.set(state);

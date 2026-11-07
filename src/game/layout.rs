@@ -10,8 +10,10 @@ use bevy::{
     window::{PrimaryWindow, WindowResized, WindowScaleFactorChanged},
 };
 
+use crate::assets::{CARD_HEIGHT, CARD_WIDTH};
+
 /// Width over height of the card images.
-const CARD_ASPECT: f32 = 169.075 / 244.64;
+const CARD_ASPECT: f32 = CARD_WIDTH as f32 / CARD_HEIGHT as f32;
 
 /// Height of the name under a marker, as a share of the marker's, and the space
 /// between them.
