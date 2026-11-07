@@ -18,9 +18,6 @@ concurrency:
   group: closed-beta
   cancel-in-progress: false
 
-env:
-  play_package: eu.vitkorp.shuftle
-
 jobs:
   android:
     name: Build and publish
@@ -38,6 +35,12 @@ jobs:
       - name: Number the build
         # Play needs a unique version code per upload.
         run: echo "ANDROID_VERSION_CODE=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+      - name: Read the app id
+        # Play's package name: the app's id.
+        run: |
+          echo "play_package=$(python3 -c '
+          import tomllib
+          print(tomllib.load(open(".cargo/config.toml", "rb"))["env"]["APP_ID"])')" >> "$GITHUB_ENV"
       - name: Download assets
         run: |
           mkdir -p assets
