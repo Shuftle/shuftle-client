@@ -13,7 +13,7 @@ use shuftlib::{
 
 use super::{
     layout::{Place, Side, TableLayout},
-    table::{GLOW_FADE, Glow},
+    table::{Badge, GLOW_FADE, Glow},
 };
 use crate::{assets::CardImages, state::AppState};
 
@@ -103,8 +103,12 @@ const GLOW_SCALE: f32 = 1.7;
 /// second.
 const PULSE_MIDDLE: f32 = 0.55;
 const PULSE_SWING: f32 = 0.3;
-/// Height of the card count on a marker, as a share of the marker's.
-const COUNT_SHARE: f32 = 0.4;
+/// Height of the card count, as a share of its badge's, and its colour, dark on
+/// the white badge.
+const COUNT_SHARE: f32 = 0.6;
+const COUNT_COLOR: Color = Color::srgb(0.1, 0.1, 0.1);
+/// Depth of a badge, over its marker.
+const BADGE_Z: f32 = 1.;
 /// Tint of the cards in the hand that can't be played.
 const UNPLAYABLE_TINT: Color = Color::linear_rgb(0.3, 0.3, 0.3);
 /// How far off its slot a hand card can be before it moves there rather than
@@ -195,6 +199,7 @@ fn init_scene(
     mut commands: Commands,
     images: Res<CardImages>,
     glow: Res<Glow>,
+    badge: Res<Badge>,
     setup_game_sys: Res<SetupGameId>,
     mut game: ResMut<GameState>,
     mut shown: ResMut<ShownScore>,
@@ -219,9 +224,14 @@ fn init_scene(
             scoped
             Sprite { image: {card_back.clone()} }
             Children [
-                MarkerCount
-                Text2d
-                Transform { translation: {Vec3::Z} }
+                MarkerBadge
+                Sprite { image: {badge.0.clone()} }
+                Children [
+                    MarkerCount
+                    Text2d
+                    TextColor(COUNT_COLOR)
+                    Transform { translation: {Vec3::Z} }
+                ]
                 --
                 MarkerName
                 Text2d({name})
@@ -455,8 +465,15 @@ fn place_markers(
     layout: Res<TableLayout>,
     game: Res<GameState>,
     mut markers: Query<(&Marker, &Children, &mut Transform, &mut Sprite)>,
+    mut badges: Query<
+        (&Children, &mut Transform, &mut Sprite),
+        (With<MarkerBadge>, Without<Marker>),
+    >,
     mut counts: Query<(&mut Text2d, &mut TextFont), (With<MarkerCount>, Without<MarkerName>)>,
-    mut names: Query<(&mut Transform, &mut TextFont), (With<MarkerName>, Without<Marker>)>,
+    mut names: Query<
+        (&mut Transform, &mut TextFont),
+        (With<MarkerName>, Without<Marker>, Without<MarkerBadge>),
+    >,
 ) {
     let view = game.session.observe(POV);
     for (marker, children, mut transform, mut sprite) in &mut markers {
@@ -469,16 +486,33 @@ fn place_markers(
             size,
         );
 
-        let count = view.hand_sizes()[marker.0];
+        let count = view.hand_sizes()[marker.0].to_string();
         for &child in children {
-            if let Ok((mut text, mut font)) = counts.get_mut(child) {
-                let count = count.to_string();
-                if text.0 != count {
-                    text.0 = count;
+            if let Ok((badge_children, mut badge_transform, mut badge_sprite)) =
+                badges.get_mut(child)
+            {
+                let badge = Place::Badge(side(marker.0));
+                let badge_size = layout.card_size(badge);
+                let corner = layout.position(badge) - layout.position(place);
+                put(
+                    &mut badge_transform,
+                    &mut badge_sprite,
+                    corner.extend(BADGE_Z),
+                    badge_size,
+                );
+                for &grandchild in badge_children {
+                    let Ok((mut text, mut font)) = counts.get_mut(grandchild) else {
+                        continue;
+                    };
+                    if text.0 != count {
+                        text.0 = count.clone();
+                    }
+                    // A squeezed window can shrink markers to nothing, but text
+                    // can't be sized 0.
+                    font.set_if_neq(TextFont::from_font_size(
+                        (badge_size.y * COUNT_SHARE).max(1.),
+                    ));
                 }
-                // A squeezed window can shrink markers to nothing, but text can't
-                // be sized 0.
-                font.set_if_neq(TextFont::from_font_size((size.y * COUNT_SHARE).max(1.)));
             }
             if let Ok((mut name_transform, mut font)) = names.get_mut(child) {
                 let (font_size, below) = layout.marker_label();
@@ -861,7 +895,11 @@ fn fit_playable_glows(
 #[derive(Component, Clone)]
 struct Marker(Seat);
 
-/// The number of cards on a marker.
+/// The white badge in a marker's corner.
+#[derive(Component, Default, Clone)]
+struct MarkerBadge;
+
+/// The number of cards on a marker, on its badge.
 #[derive(Component, Default, Clone)]
 struct MarkerCount;
 

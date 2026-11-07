@@ -18,6 +18,11 @@ const CARD_ASPECT: f32 = 169.075 / 244.64;
 const LABEL_SHARE: f32 = 0.22;
 const LABEL_SPACE: f32 = 2.;
 
+/// The badge in a marker's corner: its width, and its gap to the marker's
+/// edges, as shares of the marker's width.
+const BADGE_SHARE: f32 = 0.42;
+const BADGE_GAP: f32 = 0.07;
+
 /// The screen size assumed until the window reports its own.
 const INITIAL_SIZE: Vec2 = Vec2::new(1280., 720.);
 
@@ -113,6 +118,9 @@ pub enum Place {
     /// where the tricks they take go. The POV player has none on screen: theirs
     /// is just below the bottom edge.
     Marker(Side),
+    /// The badge with the card count, in the top right corner of the marker of
+    /// the player at this side.
+    Badge(Side),
 }
 
 /// The table's layout for the current window size.
@@ -229,6 +237,12 @@ impl TableLayout {
                     Side::Left => Vec2::new(self.table_min.x + card.x * 0.5, middle),
                 }
             }
+            Place::Badge(side) => {
+                let width = self.marker_card.x * BADGE_SHARE;
+                let gap = self.marker_card.x * BADGE_GAP;
+                self.position(Place::Marker(side)) + self.marker_card * 0.5
+                    - Vec2::splat(gap + width * 0.5)
+            }
         }
     }
 
@@ -245,6 +259,7 @@ impl TableLayout {
             Place::Hand { .. } => self.hand_card,
             Place::Trick(_) => self.trick_card,
             Place::Marker(_) => self.marker_card,
+            Place::Badge(_) => Vec2::splat(self.marker_card.x * BADGE_SHARE),
         }
     }
 

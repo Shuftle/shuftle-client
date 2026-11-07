@@ -34,6 +34,12 @@ const GLOW_SOLID: f32 = 0.5;
 /// Width of the glow's fading edge, in pixels of its texture.
 pub const GLOW_FADE: f32 = GLOW_SIZE as f32 * (1. - GLOW_SOLID) * 0.5;
 
+/// Side of the badge texture, which is scaled to the badge.
+const BADGE_SIZE: u32 = 64;
+/// Width of the badge's soft rim, in pixels of its texture, so its edge stays
+/// smooth when scaled.
+const BADGE_RIM: f32 = 1.5;
+
 /// Channels in a pixel of the generated textures: red, green, blue, alpha.
 const CHANNELS: usize = 4;
 
@@ -50,6 +56,7 @@ impl Plugin for TablePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ClearColor(Color::srgb(EDGE[0], EDGE[1], EDGE[2])))
             .init_resource::<Glow>()
+            .init_resource::<Badge>()
             .add_systems(Startup, spawn_felt)
             .add_systems(Update, size_felt.run_if(resource_changed::<TableLayout>));
     }
@@ -62,6 +69,16 @@ pub struct Glow(pub Handle<Image>);
 impl FromWorld for Glow {
     fn from_world(world: &mut World) -> Self {
         Self(world.resource_mut::<Assets<Image>>().add(glow_image()))
+    }
+}
+
+/// A white disc, to tint and put a number on.
+#[derive(Resource)]
+pub struct Badge(pub Handle<Image>);
+
+impl FromWorld for Badge {
+    fn from_world(world: &mut World) -> Self {
+        Self(world.resource_mut::<Assets<Image>>().add(badge_image()))
     }
 }
 
@@ -126,6 +143,15 @@ fn glow_image() -> Image {
             .length()
             .min(1.);
         [1., 1., 1., 1. - out * out * (3. - 2. * out)]
+    })
+}
+
+/// Draws a badge: a white disc filling the image.
+fn badge_image() -> Image {
+    let radius = BADGE_SIZE as f32 * 0.5;
+    image(BADGE_SIZE, |x, y| {
+        let distance = (Vec2::new(x as f32, y as f32) + 0.5 - radius).length();
+        [1., 1., 1., ((radius - distance) / BADGE_RIM).clamp(0., 1.)]
     })
 }
 
