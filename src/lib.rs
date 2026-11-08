@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod camera;
+pub mod catalog;
 pub mod game;
 pub mod settings;
 pub mod state;

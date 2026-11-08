@@ -7,6 +7,8 @@ use bevy::{
     prelude::*,
 };
 
+use crate::catalog::Game;
+
 /// Whether the player is in the menus, waiting for a game to load, or playing.
 #[derive(States, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum AppState {
@@ -22,6 +24,10 @@ pub enum AppState {
 pub enum Screen {
     #[default]
     Main,
+    /// The list of games to pick from.
+    Games,
+    /// How a game is played.
+    Rules(Game),
     Settings,
     About,
 }
@@ -41,7 +47,8 @@ impl Screen {
     pub fn parent(self) -> Option<Screen> {
         match self {
             Screen::Main => None,
-            Screen::Settings | Screen::About => Some(Screen::Main),
+            Screen::Games | Screen::Settings | Screen::About => Some(Screen::Main),
+            Screen::Rules(_) => Some(Screen::Games),
         }
     }
 }

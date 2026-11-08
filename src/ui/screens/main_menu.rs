@@ -2,8 +2,9 @@
 
 use bevy::{prelude::*, ui_widgets::Activate};
 
+use super::go_to;
 use crate::{
-    state::{AppState, Screen},
+    state::Screen,
     ui::{
         theme::{FONT_TITLE, ITEM_GAP, TEXT},
         widgets::{equal_share, full_screen, menu_button, screen_padding},
@@ -48,7 +49,7 @@ pub fn scene() -> impl Scene {
                 row_gap: px(ITEM_GAP),
             }
             Children [
-                @menu_button("Play") on(play)
+                @menu_button("Play") on(go_to(Screen::Games))
                 --
                 @menu_button("Settings") on(go_to(Screen::Settings))
                 --
@@ -58,15 +59,6 @@ pub fn scene() -> impl Scene {
             ]
         ]
     }
-}
-
-fn play(_: On<Activate>, mut next: ResMut<NextState<AppState>>) {
-    next.set(AppState::Loading);
-}
-
-/// Returns what opens `screen` when a button is activated.
-fn go_to(screen: Screen) -> impl Fn(On<Activate>, ResMut<NextState<Screen>>) + Clone {
-    move |_, mut next| next.set(screen)
 }
 
 fn quit(_: On<Activate>, mut exit: MessageWriter<AppExit>) {
