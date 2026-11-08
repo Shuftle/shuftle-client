@@ -26,6 +26,16 @@ pub enum Screen {
     About,
 }
 
+/// Whether the player is asked to confirm leaving the game, only while
+/// playing.
+#[derive(SubStates, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[source(AppState = AppState::InGame)]
+pub enum LeaveDialog {
+    #[default]
+    Closed,
+    Open,
+}
+
 impl Screen {
     /// Returns the screen going back leads to, if any.
     pub fn parent(self) -> Option<Screen> {
@@ -56,6 +66,7 @@ impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<AppState>()
             .add_sub_state::<Screen>()
+            .add_sub_state::<LeaveDialog>()
             .add_computed_state::<GameSession>();
     }
 }
