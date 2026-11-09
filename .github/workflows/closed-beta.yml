@@ -31,6 +31,8 @@ jobs:
         with:
           # The version code counts the commits.
           fetch-depth: 0
+          # The game's art.
+          lfs: true
           persist-credentials: false
       - name: Number the build
         # Play needs a unique version code per upload.
@@ -41,11 +43,6 @@ jobs:
           echo "play_package=$(python3 -c '
           import tomllib
           print(tomllib.load(open(".cargo/config.toml", "rb"))["env"]["APP_ID"])')" >> "$GITHUB_ENV"
-      - name: Download assets
-        run: |
-          mkdir -p assets
-          sudo apt-get update && sudo apt-get install -y megatools
-          megatools dl --path assets https://mega.nz/folder/DOZ1HCTb#sD5HuQYbZpOx2hS0apSXhQ
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,x86_64-linux-android
