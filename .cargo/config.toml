@@ -1,0 +1,4 @@
+[env]
+# The app's id on every platform: Android's application id, Play's package
+# name, and the name the settings are kept under.
+APP_ID = "eu.vitkorp.shuftle"
