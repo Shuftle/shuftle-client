@@ -5,7 +5,10 @@
 //! Positions are in world units, which match logical pixels, with the origin
 //! at the centre of the screen.
 
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::{
+    prelude::*,
+    window::{PrimaryWindow, WindowResized, WindowScaleFactorChanged},
+};
 
 /// Width over height of the card images.
 const CARD_ASPECT: f32 = 169.075 / 244.64;
@@ -14,6 +17,46 @@ const CARD_ASPECT: f32 = 169.075 / 244.64;
 /// between them.
 const LABEL_SHARE: f32 = 0.22;
 const LABEL_SPACE: f32 = 2.;
+
+/// The screen size assumed until the window reports its own.
+const INITIAL_SIZE: Vec2 = Vec2::new(1280., 720.);
+
+/// Space around the edges of the screen, as a share of its shorter side, but
+/// never less than `MIN_MARGIN`.
+const MARGIN_SHARE: f32 = 0.03;
+const MIN_MARGIN: f32 = 4.;
+/// Space between cards, as a share of the margin.
+const GAP_SHARE: f32 = 0.5;
+
+/// How the hand is laid out: the most cards on a row, the rows, and the share
+/// of the screen's height it takes.
+struct HandShape {
+    columns: usize,
+    rows: usize,
+    share: f32,
+}
+
+/// Phones held upright have room for two rows of five big cards; wide screens
+/// fit all ten in a row.
+const PORTRAIT_HAND: HandShape = HandShape {
+    columns: 5,
+    rows: 2,
+    share: 0.45,
+};
+const LANDSCAPE_HAND: HandShape = HandShape {
+    columns: 10,
+    rows: 1,
+    share: 0.35,
+};
+
+/// Height of a marker, as a share of the table's shorter side, but never more
+/// than this share of a hand card's.
+const MARKER_SHARE: f32 = 0.18;
+const MARKER_TO_HAND: f32 = 0.6;
+
+/// The trick is a diamond this many cards wide and tall.
+const TRICK_COLUMNS: f32 = 3.;
+const TRICK_ROWS: f32 = 2.;
 
 /// Room at the top that phones keep for the status bar and the selfie camera,
 /// which the game draws under but can't put anything to see or tap in. It's
@@ -27,8 +70,13 @@ pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(TableLayout::new(Vec2::new(1280., 720.), SAFE_TOP))
-            .add_systems(PreUpdate, update_layout);
+        app.insert_resource(TableLayout::new(INITIAL_SIZE, SAFE_TOP))
+            .add_systems(
+                PreUpdate,
+                update_layout.run_if(
+                    on_message::<WindowResized>.or_else(on_message::<WindowScaleFactorChanged>),
+                ),
+            );
     }
 }
 
@@ -92,19 +140,20 @@ impl TableLayout {
     /// large as fits, the other players' markers along the remaining edges, and
     /// the trick between them. The top bar goes below `safe_top`.
     pub fn new(size: Vec2, safe_top: f32) -> Self {
-        let margin = (size.min_element() * 0.03).max(4.);
-        let gap = margin * 0.5;
+        let margin = (size.min_element() * MARGIN_SHARE).max(MIN_MARGIN);
+        let gap = margin * GAP_SHARE;
         let half = size * 0.5;
 
-        // Phones held upright have room for two rows of five big cards; wide
-        // screens fit all ten in a row.
-        let portrait = size.y > size.x;
-        let (columns, rows, hand_share) = if portrait {
-            (5, 2, 0.45)
+        let HandShape {
+            columns,
+            rows,
+            share,
+        } = if is_portrait(size) {
+            PORTRAIT_HAND
         } else {
-            (10, 1, 0.35)
+            LANDSCAPE_HAND
         };
-        let hand_height = size.y * hand_share - margin;
+        let hand_height = size.y * share - margin;
         let width_bound = (size.x - 2. * margin - (columns - 1) as f32 * gap) / columns as f32;
         let height_bound = (hand_height - (rows - 1) as f32 * gap) / rows as f32;
         let hand_card = card_of_width(width_bound.min(height_bound * CARD_ASPECT));
@@ -116,17 +165,19 @@ impl TableLayout {
         let table_max = half - margin - Vec2::Y * top;
         let table_size = table_max - table_min;
 
-        let marker_card = card_of_height((table_size.min_element() * 0.18).min(hand_card.y * 0.6));
+        let marker_card = card_of_height(
+            (table_size.min_element() * MARKER_SHARE).min(hand_card.y * MARKER_TO_HAND),
+        );
 
-        // The trick fills what the markers leave, in a diamond three cards wide
-        // and two tall, but never with cards bigger than the hand's.
+        // The trick fills what the markers leave, but never with cards bigger
+        // than the hand's.
         let trick_width = table_size.x - 2. * (marker_card.x + gap);
         // The top player's marker and name take the top of the table.
         let top_marker = marker_card.y * (1. + LABEL_SHARE) + LABEL_SPACE + gap;
         let trick_height = table_size.y - top_marker;
         let trick_card = card_of_width(
-            ((trick_width - 2. * gap) / 3.)
-                .min((trick_height - gap) * 0.5 * CARD_ASPECT)
+            ((trick_width - (TRICK_COLUMNS - 1.) * gap) / TRICK_COLUMNS)
+                .min((trick_height - (TRICK_ROWS - 1.) * gap) / TRICK_ROWS * CARD_ASPECT)
                 .min(hand_card.x),
         );
         let trick_center = Vec2::new(
@@ -147,6 +198,11 @@ impl TableLayout {
             trick_center,
             top,
         }
+    }
+
+    /// Returns whether the screen is taller than wide.
+    pub fn is_portrait(&self) -> bool {
+        is_portrait(self.size)
     }
 
     /// Returns where the centre of a card at `place` goes.
@@ -206,6 +262,11 @@ impl TableLayout {
             self.hand_bottom_row + rows_below * (self.hand_card.y + self.gap),
         )
     }
+}
+
+/// Returns whether a screen of `size` is taller than wide.
+fn is_portrait(size: Vec2) -> bool {
+    size.y > size.x
 }
 
 /// Returns the size of a card `width` wide. Screens too small to fit anything

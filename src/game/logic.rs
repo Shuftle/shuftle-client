@@ -4,19 +4,18 @@ use bevy::{
     sprite::{BorderRect, TextureSlicer},
     time::DelayedCommandQueue,
     transform::TransformSystems,
-    ui_widgets::{Activate, Button},
     window::RequestRedraw,
 };
 use shuftlib::{
-    cards::italian::{ItalianRank, Suit},
     engine::{Session, Status, UpdateOf},
     tressette::{Action, Event, PerTeam, Seat, Team, Tressette, TressetteCard},
 };
 
-use crate::{
-    layout::{BAR_HEIGHT, Place, SAFE_TOP, Side, TableLayout},
+use super::{
+    layout::{Place, Side, TableLayout},
     table::{GLOW_FADE, Glow},
 };
+use crate::{assets::CardImages, state::AppState};
 
 /// The seat of the player in front of the screen.
 const POV: Seat = Seat::South;
@@ -90,19 +89,6 @@ fn side(seat: Seat) -> Side {
     }
 }
 
-/// The deck the cards are drawn from.
-const DECK: &str = "cards/italian/paris/svg-cards";
-
-/// Returns the name the deck's files use for `suit`.
-fn suit_name(suit: Suit) -> &'static str {
-    match suit {
-        Suit::Cups => "cups",
-        Suit::Coins => "coins",
-        Suit::Clubs => "clubs",
-        Suit::Swords => "swords",
-    }
-}
-
 /// Seconds a card takes to move between places.
 const TRAVEL_SECS: f32 = 0.3;
 const COLLECTION_DELAY: f32 = 2.;
@@ -113,6 +99,17 @@ const BOT_PLAY_DELAY: f32 = 0.7;
 const TURN_COLOR: Color = Color::srgb(1., 0.84, 0.45);
 /// Size of a turn glow, relative to its marker.
 const GLOW_SCALE: f32 = 1.7;
+/// A turn glow's opacity swings this much either side of its middle, once a
+/// second.
+const PULSE_MIDDLE: f32 = 0.55;
+const PULSE_SWING: f32 = 0.3;
+/// Height of the card count on a marker, as a share of the marker's.
+const COUNT_SHARE: f32 = 0.4;
+/// Tint of the cards in the hand that can't be played.
+const UNPLAYABLE_TINT: Color = Color::linear_rgb(0.3, 0.3, 0.3);
+/// How far off its slot a hand card can be before it moves there rather than
+/// jumping.
+const SNAP_DISTANCE: f32 = 0.5;
 /// How opaque the glow around the cards the POV player can play is, in the turn
 /// colour, and how far it reaches past their edges.
 const PLAYABLE_ALPHA: f32 = 0.85;
@@ -120,8 +117,8 @@ const PLAYABLE_REACH: f32 = 6.;
 /// Depth of that glow, below every card in the hand.
 const PLAYABLE_GLOW_Z: f32 = 0.5;
 /// Colours of the POV player's team, and of the other one.
-const US_COLOR: Color = Color::srgb(0.55, 0.78, 1.);
-const THEM_COLOR: Color = Color::srgb(1., 0.6, 0.55);
+pub const US_COLOR: Color = Color::srgb(0.55, 0.78, 1.);
+pub const THEM_COLOR: Color = Color::srgb(1., 0.6, 0.55);
 
 /// Drawing order: hand cards are 1 and up, in hand order. Cards in the same
 /// layer are ordered by [`card_order`], so overlapping ones don't flicker.
@@ -138,15 +135,24 @@ pub struct GameLogic;
 
 impl Plugin for GameLogic {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostStartup, init_scene)
+        app.add_systems(OnEnter(AppState::InGame), init_scene)
+            .add_systems(OnExit(AppState::InGame), cancel_delayed)
             .add_systems(
                 Update,
                 (
-                    place_cards,
-                    place_markers,
-                    show_turn,
-                    show_score.run_if(resource_changed::<ShownScore>),
-                ),
+                    place_cards.run_if(
+                        any_with_component::<Travel>.or_else(resource_changed::<TableLayout>),
+                    ),
+                    place_markers.run_if(
+                        resource_changed::<GameState>.or_else(resource_changed::<TableLayout>),
+                    ),
+                    show_turn.run_if(
+                        any_with_component::<Pulse>
+                            .or_else(resource_changed::<GameState>)
+                            .or_else(resource_changed::<TableLayout>),
+                    ),
+                )
+                    .run_if(in_state(AppState::InGame)),
             )
             .add_systems(
                 Last,
@@ -158,17 +164,19 @@ impl Plugin for GameLogic {
                     redraw.run_if(
                         any_with_component::<Travel>
                             .or_else(any_with_component::<Pulse>)
-                            .or_else(any_with_component::<DelayedCommandQueue>)
-                            .or_else(images_loading),
+                            .or_else(any_with_component::<DelayedCommandQueue>),
                     ),
                 ),
             )
             .add_systems(
                 PostUpdate,
-                fit_playable_glows.before(TransformSystems::Propagate),
+                fit_playable_glows
+                    .before(TransformSystems::Propagate)
+                    .run_if(any_with_component::<PlayableGlow>),
             )
             .add_observer(glow_playable)
             .add_observer(unglow_playable)
+            .add_observer(restart_game)
             .init_resource::<SetupGameId>()
             .init_resource::<NonPovPlayId>()
             .init_resource::<EnablePovId>()
@@ -181,36 +189,34 @@ impl Plugin for GameLogic {
     }
 }
 
-/// System called at the beginning of the game to load assets and set the
-/// table.
+/// System called at the beginning of every game, once its images are loaded,
+/// to set the table.
 fn init_scene(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    images: Res<CardImages>,
     glow: Res<Glow>,
     setup_game_sys: Res<SetupGameId>,
+    mut game: ResMut<GameState>,
+    mut shown: ResMut<ShownScore>,
+    mut cards_being_collected: ResMut<CardsBeingCollected>,
 ) {
-    // Load Italian assets
-    let mut italian_assets = ItalianAssets(Vec::with_capacity(4));
-    for suit in Suit::ALL {
-        let mut cards_in_suit = Vec::with_capacity(10);
-        for rank in ItalianRank::ALL {
-            let sprite_handle =
-                asset_server.load(format!("{DECK}/{}-{}.png", suit_name(suit), rank as u8));
-            cards_in_suit.push(sprite_handle);
-        }
-        italian_assets.0.push(cards_in_suit);
-    }
-    commands.insert_resource(italian_assets);
+    // A game left for the menu may have been anywhere.
+    *game = GameState::new();
+    *shown = ShownScore::default();
+    *cards_being_collected = CardsBeingCollected::default();
+    let scoped = DespawnOnExit(AppState::InGame);
 
     // The other players are shown by a card back with how many cards they
     // hold, named in their team's colour and glowing when it's their turn.
-    let card_back: Handle<Image> = asset_server.load(format!("{DECK}/back.png"));
+    let card_back = images.back.clone();
     for seat in Seat::ALL.into_iter().filter(|&seat| seat != POV) {
         let marker = Marker(seat);
         let name = seat.to_string();
         let color = team_color(seat);
+        let scoped = scoped.clone();
         commands.spawn_scene(bsn! {
             marker
+            scoped
             Sprite { image: {card_back.clone()} }
             Children [
                 MarkerCount
@@ -229,71 +235,6 @@ fn init_scene(
         });
     }
 
-    // The top bar, below the room phones keep for the status bar and camera.
-    commands.spawn_scene(bsn! {
-        Node {
-            position_type: PositionType::Absolute,
-            width: percent(100),
-            height: {px(SAFE_TOP + BAR_HEIGHT)},
-            padding: {UiRect { left: px(12), right: px(12), top: px(SAFE_TOP), ..default() }},
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::SpaceBetween,
-        }
-        BackgroundColor({Color::srgba(0., 0., 0., 0.3)})
-        Children [
-            Text
-            TextFont { font_size: FontSize::Px(24.) }
-            ScoreText
-            Children [
-                TextSpan
-                TextFont { font_size: FontSize::Px(24.) }
-                TextColor({US_COLOR})
-                UsScore
-                --
-                TextSpan("   ")
-                TextFont { font_size: FontSize::Px(24.) }
-                --
-                TextSpan
-                TextFont { font_size: FontSize::Px(24.) }
-                TextColor({THEM_COLOR})
-                ThemScore
-            ]
-            --
-            Text
-            TextFont { font_size: FontSize::Px(24.) }
-            TextColor({TURN_COLOR})
-            TurnText
-        ]
-    });
-
-    // The restart button, centred on the table and hidden until the game is
-    // over. What centres it covers the screen, so it lets taps through.
-    let ignore = Pickable::IGNORE;
-    commands.spawn_scene(bsn! {
-        Node {
-            position_type: PositionType::Absolute,
-            width: percent(100),
-            height: percent(100),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-        }
-        ignore
-        Children [
-            Button
-            Node {
-                padding: {UiRect::all(px(12))},
-                display: Display::None,
-            }
-            BackgroundColor({Color::srgb(0.5, 0.5, 0.5)})
-            RestartButton
-            on(restart_game)
-            Children [
-                Text("Restart Game")
-                TextFont { font_size: FontSize::Px(24.) }
-            ]
-        ]
-    });
-
     // Call system to setup game.
     commands.run_system(setup_game_sys.0);
 }
@@ -311,7 +252,7 @@ impl FromWorld for SetupGameId {
 fn setup_game(
     mut commands: Commands,
     mut game: ResMut<GameState>,
-    italian_assets: Res<ItalianAssets>,
+    images: Res<CardImages>,
     non_pov_play_id: Res<NonPovPlayId>,
     enable_pov_id: Res<EnablePovId>,
 ) {
@@ -326,13 +267,15 @@ fn setup_game(
     // below the screen, while the markers show how many the others got.
     for &card in game.session.observe(POV).hand() {
         let card = Card(card);
-        let face = italian_assets.face(card.0);
+        let face = images.face(card.0);
         let spot = Spot::Hand;
         let travel = Travel::default().starting_at(Place::Marker(Side::Bottom));
+        let scoped = DespawnOnExit(AppState::InGame);
         commands.spawn_scene(bsn! {
             card
             spot
             travel
+            scoped
             Sprite { image: {face} }
             // Sprites only get taps and clicks when they're pickable.
             Pickable
@@ -422,7 +365,9 @@ fn place_cards(
         let size = layout.card_size(place);
 
         let Some(mut travel) = travel else {
-            if *spot == Spot::Hand && transform.translation.with_z(z).distance(target) >= 0.5 {
+            if *spot == Spot::Hand
+                && transform.translation.with_z(z).distance(target) >= SNAP_DISTANCE
+            {
                 // Move rather than jump to a new slot, as when two rows merge
                 // into one.
                 commands.entity(entity).insert(Travel::default());
@@ -471,15 +416,13 @@ fn put(transform: &mut Mut<Transform>, sprite: &mut Mut<Sprite>, at: Vec3, size:
 
 /// Places the other players' markers, showing how many cards they hold.
 /// Shows whose turn it is: a glow pulsing behind the marker of the player to
-/// play, or a note in the top bar for the POV player.
+/// play. The POV player's turn shows in the glow around their playable cards.
 fn show_turn(
     layout: Res<TableLayout>,
     game: Res<GameState>,
     time: Res<Time>,
     markers: Query<(&Marker, &Children)>,
     mut glows: Query<(&mut Sprite, &mut Visibility), With<TurnGlow>>,
-    mut note: Single<&mut Text, With<TurnText>>,
-    playable: Query<(), With<Playable>>,
     mut commands: Commands,
 ) {
     let to_act = game.to_act();
@@ -501,17 +444,10 @@ fn show_turn(
             if sprite.custom_size != Some(size) {
                 sprite.custom_size = Some(size);
             }
-            let pulse = 0.55 + 0.3 * (time.elapsed_secs() * std::f32::consts::TAU).sin();
+            let pulse =
+                PULSE_MIDDLE + PULSE_SWING * (time.elapsed_secs() * std::f32::consts::TAU).sin();
             sprite.color = TURN_COLOR.with_alpha(pulse);
         }
-    }
-
-    // Only once the POV player's cards can be played: the game says it's their
-    // turn already while the last card still travels or the trick is
-    // collected.
-    let wanted = if playable.is_empty() { "" } else { "Your turn" };
-    if note.0 != wanted {
-        note.0 = wanted.into();
     }
 }
 
@@ -542,7 +478,7 @@ fn place_markers(
                 }
                 // A squeezed window can shrink markers to nothing, but text can't
                 // be sized 0.
-                font.set_if_neq(TextFont::from_font_size((size.y * 0.4).max(1.)));
+                font.set_if_neq(TextFont::from_font_size((size.y * COUNT_SHARE).max(1.)));
             }
             if let Ok((mut name_transform, mut font)) = names.get_mut(child) {
                 let (font_size, below) = layout.marker_label();
@@ -591,18 +527,6 @@ fn handle_effect(
             is_final: game.is_over(),
         };
     }
-}
-
-/// Writes the score in the top bar.
-fn show_score(
-    shown: Res<ShownScore>,
-    mut label: Single<&mut Text, With<ScoreText>>,
-    mut us: Single<&mut TextSpan, (With<UsScore>, Without<ThemScore>)>,
-    mut them: Single<&mut TextSpan, With<ThemScore>>,
-) {
-    label.0 = if shown.is_final { "Final  " } else { "" }.into();
-    us.0 = format!("Us {}", shown.us);
-    them.0 = format!("Them {}", shown.them);
 }
 
 #[derive(Component)]
@@ -658,7 +582,6 @@ fn mark_for_despawn_and_continue(
     setup_game_id: Res<SetupGameId>,
     game: Res<GameState>,
     mut cards_being_collected: ResMut<CardsBeingCollected>,
-    mut button_query: Query<&mut Node, With<RestartButton>>,
     mut commands: Commands,
 ) {
     // Decrement counter for the card that just arrived
@@ -677,9 +600,7 @@ fn mark_for_despawn_and_continue(
         // After marking cards for despawn, check what to do next based on the
         // last step
         if game.is_over() {
-            if let Ok(mut node) = button_query.single_mut() {
-                node.display = Display::Flex;
-            }
+            commands.trigger(GameOver);
         } else if game.hand_score().is_some() {
             commands.run_system(setup_game_id.0);
         } else if game.trick_taker().is_some() {
@@ -694,14 +615,20 @@ fn despawn_marked(mut commands: Commands, query: Query<Entity, With<ToDespawn>>)
     }
 }
 
-/// Called when the restart button, shown once the game is over, is activated.
+/// Triggered once the game is over.
+#[derive(Event)]
+pub struct GameOver;
+
+/// Trigger to start a new game once one is over.
+#[derive(Event)]
+pub struct RestartGame;
+
 fn restart_game(
-    activate: On<Activate>,
+    _: On<RestartGame>,
     setup_game_id: Res<SetupGameId>,
     mut game: ResMut<GameState>,
     mut shown: ResMut<ShownScore>,
     card_query: Query<Entity, With<Card>>,
-    mut button_query: Query<&mut Node, With<RestartButton>>,
     mut commands: Commands,
 ) {
     // Mark all cards for despawn
@@ -711,12 +638,18 @@ fn restart_game(
     // Reset game state
     *game = GameState::new();
     *shown = ShownScore::default();
-    // Hide the button
-    if let Ok(mut node) = button_query.get_mut(activate.entity) {
-        node.display = Display::None;
-    }
     // Restart game
     commands.run_system(setup_game_id.0);
+}
+
+/// Drops what the game left to do later, like a bot's next play, so it
+/// doesn't happen in the menu.
+fn cancel_delayed(mut commands: Commands, mut queues: Query<(Entity, &mut DelayedCommandQueue)>) {
+    for (entity, mut queue) in &mut queues {
+        // Dropped on purpose, unlike commands someone forgot to apply.
+        queue.queue.silence_drop_warning();
+        commands.entity(entity).despawn();
+    }
 }
 
 /// One shot system that determines whether it's the POV player's turn or not
@@ -761,7 +694,7 @@ fn enable_pov(
             sprite.color = Color::WHITE;
         } else {
             commands.entity(entity).remove::<Playable>();
-            sprite.color = Color::linear_rgb(0.3, 0.3, 0.3);
+            sprite.color = UNPLAYABLE_TINT;
         }
     }
 }
@@ -781,7 +714,7 @@ fn non_pov_play(
     mut game: ResMut<GameState>,
     mut commands: Commands,
     handle_effect_id: Res<HandleEffectId>,
-    italian_assets: Res<ItalianAssets>,
+    images: Res<CardImages>,
 ) {
     let Some(seat) = game.to_act() else {
         return;
@@ -793,14 +726,16 @@ fn non_pov_play(
     match game.session.act(seat, Action::Play(card)) {
         Ok(update) => {
             game.record(update);
-            let face = italian_assets.face(card);
+            let face = images.face(card);
             let card = Card(card);
             let spot = Spot::Trick(side(seat));
             let travel = Travel::then(handle_effect_id.0).starting_at(Place::Marker(side(seat)));
+            let scoped = DespawnOnExit(AppState::InGame);
             commands.spawn_scene(bsn! {
                 card
                 spot
                 travel
+                scoped
                 Sprite { image: {face} }
             });
         }
@@ -938,58 +873,19 @@ struct TurnGlow;
 #[derive(Component)]
 struct Pulse;
 
-/// Says in the top bar when it's the POV player's turn.
-#[derive(Component, Default, Clone)]
-struct TurnText;
-
 /// The name under a marker.
 #[derive(Component, Default, Clone)]
 struct MarkerName;
 
-/// The POV player's team's score, and the other team's, in the top bar.
-#[derive(Component, Default, Clone)]
-struct UsScore;
-
-#[derive(Component, Default, Clone)]
-struct ThemScore;
-
-/// The score the top bar shows.
+/// The score to show: the POV player's team's, and the other team's.
 #[derive(Resource, Default)]
-struct ShownScore {
-    us: u8,
-    them: u8,
-    is_final: bool,
-}
-
-#[derive(Component, Default, Clone)]
-struct ScoreText;
-
-/// The restart button, shown only once the game is over.
-#[derive(Component, Default, Clone)]
-struct RestartButton;
-
-/// The card faces, by suit in [`Suit::ALL`] order, then by rank in
-/// [`ItalianRank::ALL`] order.
-#[derive(Resource)]
-pub struct ItalianAssets(pub Vec<Vec<Handle<Image>>>);
-
-impl ItalianAssets {
-    /// Returns the face of `card`.
-    fn face(&self, card: TressetteCard) -> Handle<Image> {
-        self.0[card.suit() as usize][card.rank() as usize - 1].clone()
-    }
+pub struct ShownScore {
+    pub us: u8,
+    pub them: u8,
+    pub is_final: bool,
 }
 
 /// Asks for another frame.
 fn redraw(mut redraw: MessageWriter<RequestRedraw>) {
     redraw.write(RequestRedraw);
-}
-
-/// Returns whether a sprite's image is still loading.
-fn images_loading(sprites: Query<&Sprite>, asset_server: Res<AssetServer>) -> bool {
-    sprites.iter().any(|sprite| {
-        asset_server
-            .get_load_state(&sprite.image)
-            .is_some_and(|state| state.is_loading())
-    })
 }
