@@ -573,7 +573,6 @@ fn handle_effect(
         *shown = ShownScore {
             us: score[us],
             them: score[them],
-            is_final: game.is_over(),
         };
     }
 }
@@ -929,7 +928,6 @@ struct MarkerName;
 pub struct ShownScore {
     pub us: u8,
     pub them: u8,
-    pub is_final: bool,
 }
 
 /// Asks for another frame.
