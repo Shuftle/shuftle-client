@@ -249,6 +249,7 @@ pub fn screen(screen: Screen, title: &str, body: impl SceneList) -> impl Scene {
                     Node {
                         width: FULL,
                         max_width: px(CONTENT_MAX_WIDTH),
+                        flex_grow: 1.,
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
                         row_gap: px(ITEM_GAP),
