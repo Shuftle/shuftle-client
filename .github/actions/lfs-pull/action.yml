@@ -1,0 +1,24 @@
+name: Pull Git LFS files
+description: >
+  Downloads the repository's Git LFS files after a checkout without them,
+  reusing those an earlier run cached, so only new or changed files count
+  against the LFS bandwidth.
+runs:
+  using: composite
+  steps:
+    # The cache key: the ids of every LFS file in this commit.
+    - name: List the LFS files
+      shell: bash
+      run: git lfs ls-files --long | cut -d ' ' -f1 | sort > .lfs-assets-id
+    - uses: actions/cache@v6
+      with:
+        path: .git/lfs
+        key: lfs-${{ hashFiles('.lfs-assets-id') }}
+        # When files changed, starts from the latest cache: the pull then
+        # downloads only what's new.
+        restore-keys: lfs-
+    - name: Pull the LFS files
+      shell: bash
+      run: |
+        rm .lfs-assets-id
+        git lfs pull

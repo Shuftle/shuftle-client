@@ -31,9 +31,9 @@ jobs:
         with:
           # The version code counts the commits.
           fetch-depth: 0
-          # The game's art.
-          lfs: true
           persist-credentials: false
+      # The game's art.
+      - uses: ./.github/actions/lfs-pull
       - name: Number the build
         # Play needs a unique version code per upload.
         run: echo "ANDROID_VERSION_CODE=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
