@@ -165,16 +165,13 @@ impl Plugin for GameLogic {
             )
             .add_systems(
                 Last,
-                (
-                    despawn_marked.run_if(any_with_component::<ToDespawn>),
-                    // Frames are only drawn on input, or while something here
-                    // needs them: what moves, and what only gets on while
-                    // frames are drawn.
-                    redraw.run_if(
-                        any_with_component::<Travel>
-                            .or_else(any_with_component::<Pulse>)
-                            .or_else(any_with_component::<DelayedCommandQueue>),
-                    ),
+                // Frames are only drawn on input, or while something here
+                // needs them: what moves, and what only gets on while frames
+                // are drawn.
+                redraw.run_if(
+                    any_with_component::<Travel>
+                        .or_else(any_with_component::<Pulse>)
+                        .or_else(any_with_component::<DelayedCommandQueue>),
                 ),
             )
             .add_systems(
@@ -191,7 +188,7 @@ impl Plugin for GameLogic {
             .init_resource::<EnablePovId>()
             .init_resource::<HandleEffectId>()
             .init_resource::<CollectCardsId>()
-            .init_resource::<MarkForDespawnAndContinueId>();
+            .init_resource::<DespawnAndContinueId>();
     }
 }
 
@@ -268,6 +265,7 @@ fn setup_game(
     mut commands: Commands,
     mut game: ResMut<GameState>,
     images: Res<CardImages>,
+    layout: Res<TableLayout>,
     non_pov_play_id: Res<NonPovPlayId>,
     enable_pov_id: Res<EnablePovId>,
 ) {
@@ -281,17 +279,21 @@ fn setup_game(
     // Only the POV player's cards are known: they come up into the hand from
     // below the screen, while the markers show how many the others got.
     for &card in game.session.observe(POV).hand() {
+        let start = Place::Marker(Side::Bottom);
+        let (at, size) = travel_start(&layout, start, card);
+        let transform = Transform::from_translation(at);
+        let face = images.face(card);
         let card = Card(card);
-        let face = images.face(card.0);
         let spot = Spot::Hand;
-        let travel = Travel::default().starting_at(Place::Marker(Side::Bottom));
+        let travel = Travel::default().starting_at(start);
         let scoped = DespawnOnExit(AppState::InGame);
         commands.spawn_scene(bsn! {
             card
             spot
             travel
             scoped
-            Sprite { image: {face} }
+            transform
+            Sprite { image: {face}, custom_size: {Some(size)} }
             // Sprites only get taps and clicks when they're pickable.
             Pickable
             on(play_card)
@@ -394,7 +396,7 @@ fn place_cards(
         // A start place follows the layout for as long as the card travels, as
         // the window can still get its real size, or the phone be rotated.
         let (from, from_size) = match travel.start {
-            Some(start) => (layout.position(start).extend(0.), layout.card_size(start)),
+            Some(start) => travel_start(&layout, start, card.0),
             None => *travel
                 .from
                 .get_or_insert((transform.translation, sprite.custom_size.unwrap_or(size))),
@@ -416,6 +418,14 @@ fn place_cards(
             }
         }
     }
+}
+
+/// Returns where `card` is, and its size, as it sets off from `start`.
+fn travel_start(layout: &TableLayout, start: Place, card: TressetteCard) -> (Vec3, Vec2) {
+    (
+        layout.position(start).extend(TRAVEL_Z + card_order(card)),
+        layout.card_size(start),
+    )
 }
 
 /// Moves and sizes a sprite, touching it only if that changes anything: a
@@ -563,13 +573,9 @@ fn handle_effect(
         *shown = ShownScore {
             us: score[us],
             them: score[them],
-            is_final: game.is_over(),
         };
     }
 }
-
-#[derive(Component)]
-struct ToDespawn;
 
 #[derive(Resource)]
 struct CollectCardsId(SystemId);
@@ -584,7 +590,7 @@ impl FromWorld for CollectCardsId {
 fn collect_cards(
     cards: Query<(Entity, &Spot)>,
     game: Res<GameState>,
-    mark_for_despawn_and_continue_id: Res<MarkForDespawnAndContinueId>,
+    despawn_and_continue_id: Res<DespawnAndContinueId>,
     mut cards_being_collected: ResMut<CardsBeingCollected>,
     mut commands: Commands,
 ) {
@@ -594,7 +600,7 @@ fn collect_cards(
             if matches!(spot, Spot::Trick(_)) {
                 commands.entity(card).insert((
                     Spot::Taken(side(taker)),
-                    Travel::then(mark_for_despawn_and_continue_id.0),
+                    Travel::then(despawn_and_continue_id.0),
                 ));
                 count += 1;
             }
@@ -607,14 +613,14 @@ fn collect_cards(
 struct CardsBeingCollected(usize);
 
 #[derive(Resource)]
-struct MarkForDespawnAndContinueId(SystemId);
-impl FromWorld for MarkForDespawnAndContinueId {
+struct DespawnAndContinueId(SystemId);
+impl FromWorld for DespawnAndContinueId {
     fn from_world(world: &mut World) -> Self {
-        let id = world.register_system(mark_for_despawn_and_continue);
-        MarkForDespawnAndContinueId(id)
+        let id = world.register_system(despawn_and_continue);
+        DespawnAndContinueId(id)
     }
 }
-fn mark_for_despawn_and_continue(
+fn despawn_and_continue(
     cards: Query<(Entity, &Spot), Without<Travel>>,
     non_pov_play_id: Res<NonPovPlayId>,
     enable_pov_id: Res<EnablePovId>,
@@ -632,12 +638,11 @@ fn mark_for_despawn_and_continue(
     if cards_being_collected.0 == 0 {
         for (card, spot) in &cards {
             if matches!(spot, Spot::Taken(_)) {
-                commands.entity(card).insert(ToDespawn);
+                commands.entity(card).despawn();
             }
         }
 
-        // After marking cards for despawn, check what to do next based on the
-        // last step
+        // Check what to do next based on the last step
         if game.is_over() {
             commands.trigger(GameOver);
         } else if game.hand_score().is_some() {
@@ -645,12 +650,6 @@ fn mark_for_despawn_and_continue(
         } else if game.trick_taker().is_some() {
             players_play(&game, &mut commands, &non_pov_play_id, &enable_pov_id);
         }
-    }
-}
-
-fn despawn_marked(mut commands: Commands, query: Query<Entity, With<ToDespawn>>) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
     }
 }
 
@@ -670,9 +669,8 @@ fn restart_game(
     card_query: Query<Entity, With<Card>>,
     mut commands: Commands,
 ) {
-    // Mark all cards for despawn
     for card_entity in card_query.iter() {
-        commands.entity(card_entity).insert(ToDespawn);
+        commands.entity(card_entity).despawn();
     }
     // Reset game state
     *game = GameState::new();
@@ -754,6 +752,7 @@ fn non_pov_play(
     mut commands: Commands,
     handle_effect_id: Res<HandleEffectId>,
     images: Res<CardImages>,
+    layout: Res<TableLayout>,
 ) {
     let Some(seat) = game.to_act() else {
         return;
@@ -765,17 +764,21 @@ fn non_pov_play(
     match game.session.act(seat, Action::Play(card)) {
         Ok(update) => {
             game.record(update);
+            let start = Place::Marker(side(seat));
+            let (at, size) = travel_start(&layout, start, card);
+            let transform = Transform::from_translation(at);
             let face = images.face(card);
             let card = Card(card);
             let spot = Spot::Trick(side(seat));
-            let travel = Travel::then(handle_effect_id.0).starting_at(Place::Marker(side(seat)));
+            let travel = Travel::then(handle_effect_id.0).starting_at(start);
             let scoped = DespawnOnExit(AppState::InGame);
             commands.spawn_scene(bsn! {
                 card
                 spot
                 travel
                 scoped
-                Sprite { image: {face} }
+                transform
+                Sprite { image: {face}, custom_size: {Some(size)} }
             });
         }
         Err(e) => {
@@ -925,7 +928,6 @@ struct MarkerName;
 pub struct ShownScore {
     pub us: u8,
     pub them: u8,
-    pub is_final: bool,
 }
 
 /// Asks for another frame.

@@ -42,6 +42,8 @@ impl Plugin for HudPlugin {
 /// The bar at the top: the arrow back to the menu, and the score on the right.
 fn top_bar() -> impl Scene {
     let scoped = DespawnOnExit(AppState::InGame);
+    // Stays on one line, in the bar, however narrow the screen.
+    let no_wrap = TextLayout::no_wrap();
     bsn! {
         @app_bar(bsn_list! {
             @back_arrow()
@@ -52,7 +54,7 @@ fn top_bar() -> impl Scene {
             --
             Text
             TextFont { font_size: FontSize::Px(FONT_BODY) }
-            ScoreText
+            no_wrap
             Children [
                 TextSpan
                 TextFont { font_size: FontSize::Px(FONT_BODY) }
@@ -140,11 +142,9 @@ fn leave_dialog() -> impl Scene {
 /// Writes the score in the top bar.
 fn show_score(
     shown: Res<ShownScore>,
-    mut label: Single<&mut Text, With<ScoreText>>,
     mut us: Single<&mut TextSpan, (With<UsScore>, Without<ThemScore>)>,
     mut them: Single<&mut TextSpan, With<ThemScore>>,
 ) {
-    label.0 = if shown.is_final { "Final  " } else { "" }.into();
     us.0 = format!("Us {}", shown.us);
     them.0 = format!("Them {}", shown.them);
 }
@@ -221,9 +221,6 @@ struct UsScore;
 
 #[derive(Component, Default, Clone)]
 struct ThemScore;
-
-#[derive(Component, Default, Clone)]
-struct ScoreText;
 
 /// The restart button, shown only once the game is over.
 #[derive(Component, Default, Clone)]
