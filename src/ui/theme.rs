@@ -8,6 +8,8 @@ use crate::assets::{CARD_HEIGHT, CARD_WIDTH};
 
 /// Text on the felt: a warm off-white, softer than pure white.
 pub const TEXT: Color = Color::srgb(0.96, 0.93, 0.85);
+/// Text that matters less, like a version number: the same colour, fainter.
+pub const TEXT_DIM: Color = Color::srgba(0.96, 0.93, 0.85, 0.6);
 
 /// Buttons: dark glass over the felt, darker when hovered and pressed, with a
 /// faint light edge.
@@ -32,6 +34,9 @@ pub const FONT_HEADING: f32 = 36.;
 pub const FONT_BUTTON: f32 = 26.;
 pub const FONT_BODY: f32 = 24.;
 pub const FONT_SMALL: f32 = 20.;
+/// Height of a line in paragraphs, relative to the font size: looser than
+/// Bevy's default, for running text.
+pub const PARAGRAPH_LINE_HEIGHT: f32 = 1.5;
 
 /// Space between a screen's edges and what's on it.
 pub const GUTTER: f32 = 16.;
@@ -39,6 +44,8 @@ pub const GUTTER: f32 = 16.;
 pub const SECTION_GAP: f32 = 24.;
 /// Space between items in a list, like buttons.
 pub const ITEM_GAP: f32 = 12.;
+/// Space between paragraphs.
+pub const PARAGRAPH_GAP: f32 = 16.;
 
 /// Android's minimum touch target.
 pub const MIN_TAP: f32 = 48.;
