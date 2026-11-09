@@ -1,4 +1,3 @@
 /target
 /.direnv
-/assets
 gha-creds-*.json
