@@ -12,7 +12,9 @@
 
 # Declare files that will always have CRLF line endings on checkout.
 *.sln text eol=crlf
-*.bat text eol=crlf
+
+# Stored as committed: Gradle and Dependabot write them with CRLF.
+*.bat -text
 
 # Denote all files that are truly binary and should not be modified.
 *.png binary
