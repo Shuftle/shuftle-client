@@ -5,7 +5,6 @@ use bevy::{prelude::*, ui_widgets::Activate};
 use crate::{
     state::{AppState, Screen},
     ui::{
-        orient::Orient,
         theme::{FONT_TITLE, ITEM_GAP, TEXT},
         widgets::{equal_share, full_screen, menu_button, screen_padding},
     },
@@ -19,17 +18,15 @@ const CAN_QUIT: bool = !cfg!(any(
     target_os = "ios"
 ));
 
-/// Side by side on wide screens, the name above the buttons on tall ones,
-/// where the buttons sit lower, in reach of the thumb. Each half takes the
-/// same room either way.
+/// The name in the top half and the buttons in the bottom half, centred.
 pub fn scene() -> impl Scene {
     let scoped = DespawnOnExit(Screen::Main);
     bsn! {
         @full_screen()
         Node {
+            flex_direction: FlexDirection::Column,
             padding: {screen_padding()},
         }
-        Orient { portrait: FlexDirection::Column, landscape: FlexDirection::Row }
         scoped
         Children [
             @equal_share()

@@ -7,10 +7,28 @@ use bevy::{
 };
 
 use super::layout::TableLayout;
+use crate::settings::{FeltColour, TableLook};
 
-/// Felt colour in the middle of the table, and at its edges.
-const CENTRE: [f32; 3] = [0.16, 0.42, 0.25];
-const EDGE: [f32; 3] = [0.05, 0.18, 0.11];
+/// The felt's colour in the middle of the table, and at its edges.
+struct Palette {
+    centre: [f32; 3],
+    edge: [f32; 3],
+}
+
+/// The palettes of each felt colour: a billiard green, a deep blue and a
+/// casino red.
+const GREEN: Palette = Palette {
+    centre: [0.16, 0.42, 0.25],
+    edge: [0.05, 0.18, 0.11],
+};
+const BLUE: Palette = Palette {
+    centre: [0.13, 0.27, 0.45],
+    edge: [0.04, 0.09, 0.18],
+};
+const RED: Palette = Palette {
+    centre: [0.45, 0.12, 0.14],
+    edge: [0.18, 0.04, 0.05],
+};
 
 /// Side of the vignette texture, which is stretched over the screen.
 const VIGNETTE_SIZE: u32 = 256;
@@ -54,11 +72,16 @@ pub struct TablePlugin;
 
 impl Plugin for TablePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ClearColor(Color::srgb(EDGE[0], EDGE[1], EDGE[2])))
-            .init_resource::<Glow>()
+        app.init_resource::<Glow>()
             .init_resource::<Badge>()
             .add_systems(Startup, spawn_felt)
-            .add_systems(Update, size_felt.run_if(resource_changed::<TableLayout>));
+            .add_systems(
+                Update,
+                (
+                    size_felt.run_if(resource_changed::<TableLayout>),
+                    paint_felt.run_if(resource_changed::<TableLook>),
+                ),
+            );
     }
 }
 
@@ -83,29 +106,35 @@ impl FromWorld for Badge {
 }
 
 /// A layer of the felt, covering the whole screen.
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 struct Felt;
 
+/// The felt's layer with its colour.
+#[derive(Component, Default, Clone)]
+struct Vignette;
+
+/// Spawns the felt's layers. Its colour comes from the settings, painted by
+/// [`paint_felt`].
 fn spawn_felt(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
-    commands.spawn((
-        Felt,
-        Sprite::from_image(images.add(vignette_image())),
-        Transform::from_xyz(0., 0., VIGNETTE_Z),
-    ));
-    // Tiled rather than stretched, so the grain looks the same on any screen.
-    commands.spawn((
-        Felt,
+    let grain = images.add(grain_image());
+    commands.spawn_scene_list(bsn_list! {
+        Felt
+        Vignette
+        Sprite
+        Transform { translation: {Vec3::Z * VIGNETTE_Z} }
+        --
+        // Tiled over the screen.
+        Felt
         Sprite {
-            image: images.add(grain_image()),
-            image_mode: SpriteImageMode::Tiled {
+            image: grain,
+            image_mode: {SpriteImageMode::Tiled {
                 tile_x: true,
                 tile_y: true,
                 stretch_value: 1.,
-            },
-            ..default()
-        },
-        Transform::from_xyz(0., 0., GRAIN_Z),
-    ));
+            }},
+        }
+        Transform { translation: {Vec3::Z * GRAIN_Z} }
+    });
 }
 
 /// Stretches the felt over the whole screen.
@@ -115,13 +144,43 @@ fn size_felt(layout: Res<TableLayout>, mut layers: Query<&mut Sprite, With<Felt>
     }
 }
 
-/// Draws the felt's colour: lighter in the middle, darker towards the edges.
-fn vignette_image() -> Image {
+/// Colours the felt, and what shows past it, in the chosen colour.
+fn paint_felt(
+    table_look: Res<TableLook>,
+    mut vignette: Single<&mut Sprite, With<Vignette>>,
+    mut images: ResMut<Assets<Image>>,
+    mut clear: ResMut<ClearColor>,
+) {
+    let palette = palette(table_look.felt);
+    vignette.image = images.add(vignette_image(&palette));
+    let [r, g, b] = palette.edge;
+    clear.0 = Color::srgb(r, g, b);
+}
+
+/// Returns how the felt in `colour` looks in the middle of the table, to show
+/// it in a swatch.
+pub fn felt_swatch(colour: FeltColour) -> Color {
+    let [r, g, b] = palette(colour).centre;
+    Color::srgb(r, g, b)
+}
+
+/// Returns the palette of the felt in `colour`.
+fn palette(colour: FeltColour) -> Palette {
+    match colour {
+        FeltColour::Green => GREEN,
+        FeltColour::Blue => BLUE,
+        FeltColour::Red => RED,
+    }
+}
+
+/// Draws the felt's colour in `palette`: lighter in the middle, darker
+/// towards the edges.
+fn vignette_image(palette: &Palette) -> Image {
     image(VIGNETTE_SIZE, |x, y| {
         let uv = Vec2::new(x as f32, y as f32) / VIGNETTE_SIZE as f32 * 2. - 1.;
         let vignette = (uv.length() / std::f32::consts::SQRT_2).powf(VIGNETTE_FALLOFF);
         let [r, g, b] = std::array::from_fn(|channel| {
-            CENTRE[channel] + (EDGE[channel] - CENTRE[channel]) * vignette
+            palette.centre[channel] + (palette.edge[channel] - palette.centre[channel]) * vignette
         });
         [r, g, b, 1.]
     })

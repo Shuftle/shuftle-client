@@ -70,8 +70,8 @@ const TRICK_ROWS: f32 = 2.;
 /// the status bar's height on current phones: their cameras sit inside it.
 pub const SAFE_TOP: f32 = if cfg!(target_os = "android") { 48. } else { 0. };
 
-/// Height of the bar at the top for the score, below `SAFE_TOP`.
-pub const BAR_HEIGHT: f32 = 40.;
+/// Height of the bar at the top of every screen, below `SAFE_TOP`.
+pub const BAR_HEIGHT: f32 = 56.;
 
 pub struct LayoutPlugin;
 
@@ -208,11 +208,6 @@ impl TableLayout {
             trick_center,
             top,
         }
-    }
-
-    /// Returns whether the screen is taller than wide.
-    pub fn is_portrait(&self) -> bool {
-        is_portrait(self.size)
     }
 
     /// Returns where the centre of a card at `place` goes.

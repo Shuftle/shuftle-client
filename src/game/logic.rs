@@ -15,7 +15,10 @@ use super::{
     layout::{Place, Side, TableLayout},
     table::{Badge, GLOW_FADE, Glow},
 };
-use crate::{assets::CardImages, state::AppState};
+use crate::{
+    assets::CardImages,
+    state::{AppState, GameSession},
+};
 
 /// The seat of the player in front of the screen.
 const POV: Seat = Seat::South;
@@ -141,6 +144,7 @@ impl Plugin for GameLogic {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::InGame), init_scene)
             .add_systems(OnExit(AppState::InGame), cancel_delayed)
+            .add_systems(OnExit(GameSession), end_game)
             .add_systems(
                 Update,
                 (
@@ -148,11 +152,12 @@ impl Plugin for GameLogic {
                         any_with_component::<Travel>.or_else(resource_changed::<TableLayout>),
                     ),
                     place_markers.run_if(
-                        resource_changed::<GameState>.or_else(resource_changed::<TableLayout>),
+                        resource_exists_and_changed::<GameState>
+                            .or_else(resource_changed::<TableLayout>),
                     ),
                     show_turn.run_if(
                         any_with_component::<Pulse>
-                            .or_else(resource_changed::<GameState>)
+                            .or_else(resource_exists_and_changed::<GameState>)
                             .or_else(resource_changed::<TableLayout>),
                     ),
                 )
@@ -186,11 +191,15 @@ impl Plugin for GameLogic {
             .init_resource::<EnablePovId>()
             .init_resource::<HandleEffectId>()
             .init_resource::<CollectCardsId>()
-            .init_resource::<MarkForDespawnAndContinueId>()
-            .init_resource::<CardsBeingCollected>()
-            .init_resource::<ShownScore>()
-            .insert_resource(GameState::new());
+            .init_resource::<MarkForDespawnAndContinueId>();
     }
+}
+
+/// Removes what a game kept, once it's over.
+fn end_game(mut commands: Commands) {
+    commands.remove_resource::<GameState>();
+    commands.remove_resource::<ShownScore>();
+    commands.remove_resource::<CardsBeingCollected>();
 }
 
 /// System called at the beginning of every game, once its images are loaded,
@@ -201,14 +210,10 @@ fn init_scene(
     glow: Res<Glow>,
     badge: Res<Badge>,
     setup_game_sys: Res<SetupGameId>,
-    mut game: ResMut<GameState>,
-    mut shown: ResMut<ShownScore>,
-    mut cards_being_collected: ResMut<CardsBeingCollected>,
 ) {
-    // A game left for the menu may have been anywhere.
-    *game = GameState::new();
-    *shown = ShownScore::default();
-    *cards_being_collected = CardsBeingCollected::default();
+    commands.insert_resource(GameState::new());
+    commands.insert_resource(ShownScore::default());
+    commands.insert_resource(CardsBeingCollected::default());
     let scoped = DespawnOnExit(AppState::InGame);
 
     // The other players are shown by a card back with how many cards they

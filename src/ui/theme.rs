@@ -4,6 +4,8 @@
 
 use bevy::prelude::*;
 
+use crate::assets::{CARD_HEIGHT, CARD_WIDTH};
+
 /// Text on the felt: a warm off-white, softer than pure white.
 pub const TEXT: Color = Color::srgb(0.96, 0.93, 0.85);
 
@@ -13,6 +15,10 @@ pub const BUTTON: Color = Color::srgba(0., 0., 0., 0.35);
 pub const BUTTON_HOVERED: Color = Color::srgba(0., 0., 0., 0.5);
 pub const BUTTON_PRESSED: Color = Color::srgba(0., 0., 0., 0.65);
 pub const BUTTON_BORDER: Color = Color::srgba(1., 1., 1., 0.25);
+/// The chosen option in a row of choices: lighter than a button, with the
+/// text's colour as a solid edge.
+pub const CHOSEN: Color = Color::srgba(1., 1., 1., 0.15);
+pub const CHOSEN_BORDER: Color = TEXT;
 
 /// Behind the bar at the top of the table.
 pub const BAR: Color = Color::srgba(0., 0., 0., 0.3);
@@ -35,16 +41,33 @@ pub const ITEM_GAP: f32 = 12.;
 pub const MIN_TAP: f32 = 48.;
 /// Widest a button gets.
 pub const BUTTON_MAX_WIDTH: f32 = 360.;
-/// Widest a screen's content gets, so lines stay easy to read.
+/// Widest a screen's content gets.
 pub const CONTENT_MAX_WIDTH: f32 = 720.;
-/// Narrowest a button sized to its label gets.
-pub const BUTTON_MIN_WIDTH: f32 = 96.;
 /// Space around a button's label, sideways and up and down.
 pub const BUTTON_PADDING: Vec2 = Vec2::new(24., 10.);
-/// The same, for the small buttons in the top bar.
-pub const BAR_BUTTON_PADDING: Vec2 = Vec2::new(10., 4.);
 pub const BUTTON_RADIUS: f32 = 10.;
 pub const BORDER: f32 = 1.;
+/// Width of the edge of an option in a row of choices.
+pub const CHOICE_BORDER: f32 = 2.;
+/// Width of every option in a row of choices.
+pub const CHOICE_WIDTH: f32 = 140.;
+/// Space inside an option, around its preview and name, and between them.
+pub const CHOICE_PADDING: f32 = 10.;
+pub const CHOICE_GAP: f32 = 8.;
+/// An option's preview: a small card, in the cards' shape.
+pub const PREVIEW_WIDTH: f32 = 72.;
+pub const PREVIEW_HEIGHT: f32 = PREVIEW_WIDTH * CARD_HEIGHT as f32 / CARD_WIDTH as f32;
+/// Corner roundness of a preview, like a card's.
+pub const PREVIEW_RADIUS: f32 = 4.;
+
+/// The scrollbar beside a screen's content: its width, its space to the
+/// screen's edge, and the shortest its thumb gets.
+pub const SCROLLBAR_WIDTH: f32 = 6.;
+pub const SCROLLBAR_MARGIN: f32 = 4.;
+pub const SCROLLBAR_MIN_THUMB: f32 = 32.;
+/// Its thumb: faint light glass, brighter while hovered or dragged.
+pub const THUMB: Color = Color::srgba(1., 1., 1., 0.25);
+pub const THUMB_ACTIVE: Color = Color::srgba(1., 1., 1., 0.5);
 
 /// All of the parent's width or height.
 pub const FULL: Val = Val::Percent(100.);

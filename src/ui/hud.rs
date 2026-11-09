@@ -7,14 +7,11 @@ use bevy::{
 };
 
 use super::{
-    theme::{BAR, FONT_BODY, FULL, ITEM_GAP},
-    widgets::{bar_button, full_screen, menu_button},
+    theme::FONT_BODY,
+    widgets::{app_bar, back_arrow, full_screen, menu_button},
 };
 use crate::{
-    game::{
-        layout::{BAR_HEIGHT, SAFE_TOP},
-        logic::{GameOver, RestartGame, ShownScore, THEM_COLOR, US_COLOR},
-    },
+    game::logic::{GameOver, RestartGame, ShownScore, THEM_COLOR, US_COLOR},
     state::{AppState, is_back},
 };
 
@@ -35,23 +32,16 @@ impl Plugin for HudPlugin {
     }
 }
 
-/// The top bar, below the room phones keep for the status bar and camera.
+/// The bar at the top: the arrow back to the menu, and the score on the right.
 fn top_bar() -> impl Scene {
     let scoped = DespawnOnExit(AppState::InGame);
     bsn! {
-        Node {
-            position_type: PositionType::Absolute,
-            width: FULL,
-            height: {px(SAFE_TOP + BAR_HEIGHT)},
-            padding: {UiRect { left: px(ITEM_GAP), right: px(ITEM_GAP), top: px(SAFE_TOP), ..default() }},
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::SpaceBetween,
-        }
-        scoped
-        BackgroundColor(BAR)
-        Children [
-            @bar_button("Menu")
+        @app_bar(bsn_list! {
+            @back_arrow()
             on(open_menu)
+            --
+            // Pushes the score to the right.
+            Node { flex_grow: 1. }
             --
             Text
             TextFont { font_size: FontSize::Px(FONT_BODY) }
@@ -70,7 +60,9 @@ fn top_bar() -> impl Scene {
                 TextColor({THEM_COLOR})
                 ThemScore
             ]
-        ]
+        })
+        Node { position_type: PositionType::Absolute }
+        scoped
     }
 }
 
