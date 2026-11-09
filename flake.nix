@@ -40,6 +40,8 @@
         devShells.default = mkShell rec {
           nativeBuildInputs = [
             pkg-config
+            # The art in assets/.
+            git-lfs
 
             # Android
             androidSdk

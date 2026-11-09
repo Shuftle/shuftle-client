@@ -6,9 +6,7 @@ The rules of the games live in [shuftlib](https://github.com/Shuftle/shuftlib), 
 ## Build from source
 The [Nix](https://nixos.org) flake provides everything: Rust with the web and Android targets, the Android SDK and NDK, and the tools CI uses. Enter it with `nix develop`, or let [direnv](https://direnv.net) load it from `.envrc`. Without Nix, see [Bevy's setup guide](https://bevy.org/learn/quick-start/getting-started/setup/) for the system libraries.
 
-Assets aren't in the repo. Download them into `assets/`, from the [Mega folder](https://mega.nz/folder/DOZ1HCTb#sD5HuQYbZpOx2hS0apSXhQ).
-
-Then, on desktop:
+On desktop:
 
 ```sh
 cargo run --features dev
@@ -35,4 +33,4 @@ The Rust [code of conduct](https://rust-lang.org/policies/code-of-conduct/) and 
 ## Licences
 The code is licensed under the GNU AGPLv3, in [`LICENSE-AGPL_v3`](LICENSE-AGPL_v3).
 
-The art keeps its own licences. Each pack in the [assets](https://mega.nz/folder/DOZ1HCTb#sD5HuQYbZpOx2hS0apSXhQ) has its own folder, with a `CREDITS.md` naming its source, author and licence, and a `LICENSE` where its licence asks for one.
+The art keeps its own licences. Each pack in [`assets/`](assets) has its own folder, with a `CREDITS.md` naming its source, author and licence, and a `LICENSE` where its licence asks for one.

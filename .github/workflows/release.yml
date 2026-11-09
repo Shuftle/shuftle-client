@@ -26,8 +26,6 @@ env:
   add_binaries_to_github_release: true
   itch_target: krahos/shuftle
 
-  use_git_lfs: false
-
 jobs:
   # Build for wasm
   release-wasm:
@@ -40,13 +38,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.VERSION }}
-          lfs: ${{ env.use_git_lfs }}
           persist-credentials: false
-      - name: Download assets
-        run: |
-          mkdir -p assets
-          sudo apt-get update && sudo apt-get install -y megatools
-          megatools dl --path assets https://mega.nz/folder/DOZ1HCTb#sD5HuQYbZpOx2hS0apSXhQ
+      # The game's art.
+      - uses: ./.github/actions/lfs-pull
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
