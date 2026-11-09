@@ -1,0 +1,66 @@
+//! The first screen: the game's name, and what the player can do from there.
+
+use bevy::{prelude::*, ui_widgets::Activate};
+
+use super::go_to;
+use crate::{
+    state::Screen,
+    ui::{
+        theme::{FONT_TITLE, ITEM_GAP, TEXT},
+        widgets::{equal_share, full_screen, menu_button, screen_padding},
+    },
+};
+
+/// Whether the platform lets apps quit: phones and browsers leave that to
+/// the system.
+const CAN_QUIT: bool = !cfg!(any(
+    target_arch = "wasm32",
+    target_os = "android",
+    target_os = "ios"
+));
+
+/// The name in the top half and the buttons in the bottom half, centred.
+pub fn scene() -> impl Scene {
+    let scoped = DespawnOnExit(Screen::Main);
+    bsn! {
+        @full_screen()
+        Node {
+            flex_direction: FlexDirection::Column,
+            padding: {screen_padding()},
+        }
+        scoped
+        Children [
+            @equal_share()
+            Node {
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+            }
+            Children [
+                Text("Shuftle")
+                TextFont { font_size: FontSize::Px(FONT_TITLE) }
+                TextColor(TEXT)
+            ]
+            --
+            @equal_share()
+            Node {
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                row_gap: px(ITEM_GAP),
+            }
+            Children [
+                @menu_button("Play") on(go_to(Screen::Games))
+                --
+                @menu_button("Settings") on(go_to(Screen::Settings))
+                --
+                @menu_button("About") on(go_to(Screen::About))
+                --
+                {CAN_QUIT.then(|| bsn_list! { @menu_button("Quit") on(quit) })}
+            ]
+        ]
+    }
+}
+
+fn quit(_: On<Activate>, mut exit: MessageWriter<AppExit>) {
+    exit.write(AppExit::Success);
+}
