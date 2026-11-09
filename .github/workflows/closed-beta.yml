@@ -94,6 +94,5 @@ jobs:
         with:
           serviceAccountJson: ${{ steps.auth.outputs.credentials_file_path }}
           packageName: ${{ env.play_package }}
-          releaseName: ${{ github.sha }}
           releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
           tracks: alpha
