@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/Shuftle/shuftle-client/compare/v0.3.0...v0.4.0) - 2026-11-09
+
+### Added
+
+- about screen ([#39](https://github.com/Shuftle/shuftle-client/pull/39))
+- game list ([#37](https://github.com/Shuftle/shuftle-client/pull/37))
+- settings screen ([#36](https://github.com/Shuftle/shuftle-client/pull/36))
+- Main menu ([#32](https://github.com/Shuftle/shuftle-client/pull/32))
+
+### Fixed
+
+- score line and card flickers ([#38](https://github.com/Shuftle/shuftle-client/pull/38))
+- card count clear of the card back emblem ([#33](https://github.com/Shuftle/shuftle-client/pull/33))
+
+### Other
+
+- storing assets in the repo ([#42](https://github.com/Shuftle/shuftle-client/pull/42))
+- gradlew eol, google play name ([#41](https://github.com/Shuftle/shuftle-client/pull/41))
+- *(deps)* bump the gradle-minor-patch group ([#30](https://github.com/Shuftle/shuftle-client/pull/30))
+- *(deps)* bump webbrowser ([#40](https://github.com/Shuftle/shuftle-client/pull/40))
+- listing asset packs at build time ([#35](https://github.com/Shuftle/shuftle-client/pull/35))
+- Android play ([#29](https://github.com/Shuftle/shuftle-client/pull/29))
+- release polish ([#27](https://github.com/Shuftle/shuftle-client/pull/27))
+
 ## [0.3.0](https://github.com/Shuftle/shuftle-client/compare/v0.2.2...v0.3.0) - 2026-10-17
 
 ### Added
