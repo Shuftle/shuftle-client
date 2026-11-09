@@ -340,11 +340,16 @@ pub fn app_bar(content: impl SceneList) -> impl Scene {
     }
 }
 
-/// The arrow back to the screen above, as big as Android's minimum touch
-/// target.
+/// The arrow back to the screen above.
 pub fn back_arrow() -> impl Scene {
+    icon_button("<")
+}
+
+/// A square button showing a single sign, as big as Android's minimum touch
+/// target.
+pub fn icon_button(sign: &str) -> impl Scene {
     bsn! {
-        @button("<", FONT_HEADING, Vec2::ZERO)
+        @button(sign, FONT_HEADING, Vec2::ZERO)
         Node {
             width: px(MIN_TAP),
             height: px(MIN_TAP),

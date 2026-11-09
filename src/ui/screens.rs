@@ -2,8 +2,10 @@
 //! a game loads.
 
 mod about;
+mod games;
 mod loading;
 mod main_menu;
+mod rules;
 mod settings;
 
 use bevy::{
@@ -12,11 +14,12 @@ use bevy::{
     input_focus::FocusedInput,
     prelude::*,
     ui::{Checked, Pressed},
-    ui_widgets::radio_self_update,
+    ui_widgets::{Activate, radio_self_update},
 };
 
 use super::widgets;
 use crate::{
+    catalog::Game,
     settings::{BackId, DeckId, FeltColour},
     state::{AppState, Screen, is_back},
 };
@@ -25,7 +28,14 @@ pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
+        for game in Game::ALL {
+            app.add_systems(
+                OnEnter(Screen::Rules(game)),
+                (move || rules::scene(game)).spawn(),
+            );
+        }
         app.add_systems(OnEnter(Screen::Main), main_menu::scene.spawn())
+            .add_systems(OnEnter(Screen::Games), games::scene.spawn())
             .add_systems(OnEnter(Screen::Settings), settings::spawn)
             .add_systems(OnEnter(Screen::About), about::scene.spawn())
             .add_systems(OnEnter(AppState::Loading), loading::scene.spawn())
@@ -50,6 +60,11 @@ impl Plugin for MenuPlugin {
             .add_observer(settings::pick::<BackId>)
             .add_observer(settings::pick::<FeltColour>);
     }
+}
+
+/// Returns what opens `screen` when a button is activated.
+fn go_to(screen: Screen) -> impl Fn(On<Activate>, ResMut<NextState<Screen>>) + Clone {
+    move |_, mut next| next.set(screen)
 }
 
 /// Goes to the screen above this one on Esc, or Android's back gesture.

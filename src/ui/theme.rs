@@ -23,6 +23,9 @@ pub const CHOSEN_BORDER: Color = TEXT;
 /// Behind the bar at the top of the table.
 pub const BAR: Color = Color::srgba(0., 0., 0., 0.3);
 
+/// Over the table while a dialog is open.
+pub const SCRIM: Color = Color::srgba(0., 0., 0., 0.5);
+
 /// Text sizes, from the game's name down to the smallest labels.
 pub const FONT_TITLE: f32 = 64.;
 pub const FONT_HEADING: f32 = 36.;
@@ -41,6 +44,10 @@ pub const ITEM_GAP: f32 = 12.;
 pub const MIN_TAP: f32 = 48.;
 /// Widest a button gets.
 pub const BUTTON_MAX_WIDTH: f32 = 360.;
+/// Space between a dialog's edges and what's in it.
+pub const DIALOG_PADDING: f32 = SECTION_GAP;
+/// Widest a dialog gets: a button and the space around it.
+pub const DIALOG_MAX_WIDTH: f32 = BUTTON_MAX_WIDTH + 2. * DIALOG_PADDING;
 /// Widest a screen's content gets.
 pub const CONTENT_MAX_WIDTH: f32 = 720.;
 /// Space around a button's label, sideways and up and down.

@@ -7,6 +7,8 @@ use bevy::{
     prelude::*,
 };
 
+use crate::catalog::Game;
+
 /// Whether the player is in the menus, waiting for a game to load, or playing.
 #[derive(States, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum AppState {
@@ -22,8 +24,22 @@ pub enum AppState {
 pub enum Screen {
     #[default]
     Main,
+    /// The list of games to pick from.
+    Games,
+    /// How a game is played.
+    Rules(Game),
     Settings,
     About,
+}
+
+/// Whether the player is asked to confirm leaving the game, only while
+/// playing.
+#[derive(SubStates, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[source(AppState = AppState::InGame)]
+pub enum LeaveDialog {
+    #[default]
+    Closed,
+    Open,
 }
 
 impl Screen {
@@ -31,7 +47,8 @@ impl Screen {
     pub fn parent(self) -> Option<Screen> {
         match self {
             Screen::Main => None,
-            Screen::Settings | Screen::About => Some(Screen::Main),
+            Screen::Games | Screen::Settings | Screen::About => Some(Screen::Main),
+            Screen::Rules(_) => Some(Screen::Games),
         }
     }
 }
@@ -56,6 +73,7 @@ impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<AppState>()
             .add_sub_state::<Screen>()
+            .add_sub_state::<LeaveDialog>()
             .add_computed_state::<GameSession>();
     }
 }
