@@ -1,6 +1,6 @@
-name: Closed beta
+name: Dev
 
-# Every change to main goes to Google Play's closed testing track.
+# Every change to main goes to Google Play's open testing track.
 on:
   push:
     branches:
@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: closed-beta
+  group: dev
   cancel-in-progress: false
 
 jobs:
@@ -92,4 +92,4 @@ jobs:
           serviceAccountJson: ${{ steps.auth.outputs.credentials_file_path }}
           packageName: ${{ env.play_package }}
           releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
-          tracks: alpha
+          tracks: beta
