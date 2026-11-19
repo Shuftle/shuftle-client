@@ -52,7 +52,6 @@
           ];
           buildInputs = [
               bacon
-              cargo-machete
               cargo-edit
               cargo-deny
               wasm-bindgen-cli

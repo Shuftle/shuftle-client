@@ -86,7 +86,9 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Linting
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        env:
+          CARGO_BUILD_WARNINGS: deny
+        run: cargo clippy --locked --workspace --all-targets --all-features
 
   wasm:
     name: Wasm check
@@ -101,18 +103,10 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Linting
-        run: cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings
-
-  dependencies:
-    name: Unused dependencies
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Machete
-        uses: bnjbvr/cargo-machete@v0.9.2
-
+        # Fails on any warning, Cargo's own lints such as unused dependencies included.
+        env:
+          CARGO_BUILD_WARNINGS: deny
+        run: cargo clippy --locked --target wasm32-unknown-unknown
   android:
     name: Android build
     runs-on: ubuntu-latest
