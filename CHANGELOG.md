@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1](https://github.com/Shuftle/shuftle-client/compare/v0.4.0...v0.4.1) - 2026-11-19
+
+### Fixed
+
+- allow any screen orientation ([#46](https://github.com/Shuftle/shuftle-client/pull/46))
+
+### Other
+
+- Android open testing ([#45](https://github.com/Shuftle/shuftle-client/pull/45))
+- *(deps)* bump the gradle-minor-patch group ([#43](https://github.com/Shuftle/shuftle-client/pull/43))
+
 ## [0.4.0](https://github.com/Shuftle/shuftle-client/compare/v0.3.0...v0.4.0) - 2026-11-09
 
 ### Added
